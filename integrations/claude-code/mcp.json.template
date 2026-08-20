@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "visual_studio_csharp_navigator": {
+      "command": "__ABSOLUTE_PATH_TO_VisualStudio.CSharpNavigator.Server.exe__",
+      "args": [],
+      "env": {
+        "VisualStudioBridge__ConnectTimeoutMilliseconds": "5000",
+        "VisualStudioBridge__DiscoveryStaleAfterSeconds": "120"
+      }
+    }
+  }
+}

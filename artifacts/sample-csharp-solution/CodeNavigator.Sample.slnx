@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/CodeNavigator.Sample/CodeNavigator.Sample.csproj" />
+  <Project Path="src/CodeNavigator.Sample.Generator/CodeNavigator.Sample.Generator.csproj" />
+</Solution>
