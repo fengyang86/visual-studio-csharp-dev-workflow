@@ -1462,7 +1462,7 @@ sealed record BenchmarkProfile(
             ReadSetting("CODE_NAVIGATOR_BENCHMARK_SOLUTION")
                 ?? ReadSetting("CODE_NAVIGATOR_TEST_SOLUTION")
                 ?? ReadSetting("VisualStudioBridge__SolutionPath")
-                ?? @"D:\Samples\SampleWorkspace\SampleWorkspace.sln",
+                ?? @"D:\WorkCodes\SampleWorkspaceFork\SampleWorkspace.sln",
             targetPipeName,
             targetInstanceId,
             ReadSetting("CODE_NAVIGATOR_BENCHMARK_SYMBOL")
@@ -1479,7 +1479,7 @@ sealed record BenchmarkProfile(
                 ?? "SampleWorkspace.Core",
             ReadSetting("CODE_NAVIGATOR_BENCHMARK_DOCUMENT")
                 ?? ReadSetting("CODE_NAVIGATOR_TEST_DOCUMENT")
-                ?? @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\Elements\Basic\LcLine.cs");
+                ?? @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\Elements\Basic\LcLine.cs");
     }
 
     private static string? ReadSetting(string name)

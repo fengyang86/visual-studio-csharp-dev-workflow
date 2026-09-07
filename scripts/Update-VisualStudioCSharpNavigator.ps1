@@ -7,6 +7,9 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
 
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$Version = "0.1.0",
+
     [switch]$NoRestore,
 
     [switch]$StagingOnly,
@@ -153,6 +156,7 @@ Write-Section "Update plan"
 Write-Detail "ProjectRoot: $ProjectRoot"
 Write-Detail "PluginPath: $PluginPath"
 Write-Detail "Configuration: $Configuration"
+Write-Detail "Version: $Version"
 Write-Detail "StagingOnly: $StagingOnly"
 Write-Detail "InstallVsix: $InstallVsix"
 Write-Detail "ForcePluginRuntimeOverwrite: $ForcePluginRuntimeOverwrite"
@@ -176,6 +180,8 @@ $packageArgs = @(
     $PluginPath,
     "-Configuration",
     $Configuration,
+    "-Version",
+    $Version,
     "-Build"
 )
 if ($NoRestore) {

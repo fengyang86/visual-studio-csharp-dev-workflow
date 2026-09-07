@@ -12,7 +12,7 @@ A local MCP workflow for AI-assisted C# development in Visual Studio. It combine
 - Debugger context and explicit debug controls.
 - MCP resources for deferred evidence, reducing repeated output and model context usage.
 
-The current MCP schema exposes 82 tools and 15 resource templates.
+The current MCP schema exposes 83 tools and 15 resource templates.
 
 ## Architecture
 
@@ -35,10 +35,12 @@ The VSIX is the only component that accesses Visual Studio in-process APIs. Clie
 | Client | Status |
 | --- | --- |
 | Codex | Supported through the packaged plugin and workflow skill |
+| DeepSeekHarness | Supported through a Cordis patch integration; see [`integrations/deepseek-harness/`](integrations/deepseek-harness/README.md) |
 | Claude Code | MCP configuration is provided; clean-environment smoke testing is pending |
-| DeepSeekHarness | Experimental MCP configuration; version-specific smoke testing is required |
 
-See [`integrations/`](integrations/README.md) for configuration templates.
+The distribution zip carries one shared MCP runtime, one VSIX, and two host installers: `Install-CodexPlugin.ps1` and `Install-DshMcpServer.ps1`.
+
+See [`integrations/`](integrations/README.md) for configuration templates and support levels.
 
 ## Build and test
 
@@ -63,7 +65,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Publish-McpServerR
 Generate a client configuration snippet without overwriting user settings:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\New-McpClientConfiguration.ps1 -ClientHost ClaudeCode -ServerExe <absolute-server-exe-path> -OutputPath .\mcp.json
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\New-McpClientConfiguration.ps1 -ClientHost DeepSeekHarness -ServerExe <absolute-server-exe-path> -OutputPath .\visual-studio-csharp-navigator.cordis.patch.yml
+```
+
+Build the dual-host distribution zip:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\New-VisualStudioCSharpNavigatorDistribution.ps1 -Version 0.2.0
 ```
 
 ## Safety model

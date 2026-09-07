@@ -41,7 +41,7 @@ VisualStudioBridge__ConnectTimeoutMilliseconds = '5000'
 VisualStudioBridge__DiscoveryStaleAfterSeconds = '120'
 "@
 }
-else {
+elseif ($ClientHost -eq "ClaudeCode") {
     $configuration = [ordered]@{
         mcpServers = [ordered]@{
             visual_studio_csharp_navigator = [ordered]@{
@@ -55,6 +55,27 @@ else {
         }
     }
     $content = $configuration | ConvertTo-Json -Depth 10
+}
+else {
+    # DeepSeekHarness registers stdio MCP servers through a Cordis patch layer that
+    # instantiates the bundled @deepseek-ai/dsh-mcp-client plugin. The generated
+    # fragment is the single managed list entry; merge it into either
+    # <DSH_HOME>\profiles\<profile>\cordis.patch.yml (one profile) or
+    # <DSH_HOME>\cordis.patch.yml (all profiles). If the target file only
+    # contains [], replace the whole file with this list.
+    $content = @"
+- insert:
+    - id: mcp-visual-studio-csharp-navigator
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: visual_studio_csharp_navigator
+        transport: stdio
+        command: '$serverPath'
+        args: []
+        env:
+          VisualStudioBridge__ConnectTimeoutMilliseconds: '5000'
+          VisualStudioBridge__DiscoveryStaleAfterSeconds: '120'
+"@
 }
 
 [System.IO.File]::WriteAllText(

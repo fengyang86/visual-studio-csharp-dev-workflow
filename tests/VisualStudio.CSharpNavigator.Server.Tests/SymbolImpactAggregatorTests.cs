@@ -16,7 +16,7 @@ public sealed class SymbolImpactAggregatorTests
             Kind = CodeSymbolKind.Method,
             Span = new SourceSpan
             {
-                FilePath = @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\LcObject.cs",
+                FilePath = @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\LcObject.cs",
                 StartLine = 199,
                 StartColumn = 21,
                 EndLine = 199,
@@ -29,21 +29,21 @@ public sealed class SymbolImpactAggregatorTests
             new SymbolImpactSite
             {
                 ProjectName = "SampleWorkspace.Core",
-                FilePath = @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\A.cs",
+                FilePath = @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\A.cs",
                 ContainingType = "SampleWorkspace.Core.ExecutorA",
                 Role = ReferenceRole.Invocation,
             },
             new SymbolImpactSite
             {
                 ProjectName = "SampleWorkspace.Core",
-                FilePath = @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\A.cs",
+                FilePath = @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\A.cs",
                 ContainingType = "SampleWorkspace.Core.ExecutorA",
                 Role = ReferenceRole.Invocation,
             },
             new SymbolImpactSite
             {
                 ProjectName = "SampleWorkspace.Drawing",
-                FilePath = @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Drawing\B.cs",
+                FilePath = @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Drawing\B.cs",
                 ContainingType = "SampleWorkspace.Drawing.ExecutorB",
                 Role = ReferenceRole.Read,
                 Depth = 2,
@@ -51,7 +51,7 @@ public sealed class SymbolImpactAggregatorTests
             new SymbolImpactSite
             {
                 ProjectName = "SampleWorkspace.Drawing",
-                FilePath = @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Drawing\C.cs",
+                FilePath = @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Drawing\C.cs",
                 ContainingType = "SampleWorkspace.Drawing.ExecutorC",
                 Role = ReferenceRole.Write,
             },
@@ -117,7 +117,7 @@ public sealed class SymbolImpactAggregatorTests
             });
 
         var firstFile = Assert.IsType<SymbolImpactFileSummary>(result.Summary.Files[0]);
-        Assert.Equal(@"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\A.cs", firstFile.FilePath);
+        Assert.Equal(@"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\A.cs", firstFile.FilePath);
         Assert.Equal(2, firstFile.Count);
         Assert.Single(firstFile.RoleCounts);
         Assert.Equal(ReferenceRole.Invocation, firstFile.RoleCounts[0].Role);
@@ -143,14 +143,14 @@ public sealed class SymbolImpactAggregatorTests
             new SymbolImpactSite
             {
                 ProjectName = "SampleWorkspace.Core",
-                FilePath = @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\A.cs",
+                FilePath = @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\A.cs",
                 ContainingType = "SampleWorkspace.Core.ExecutorA",
                 Role = ReferenceRole.Read,
             },
             new SymbolImpactSite
             {
                 ProjectName = "SampleWorkspace.Drawing",
-                FilePath = @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Drawing\B.cs",
+                FilePath = @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Drawing\B.cs",
                 ContainingType = "SampleWorkspace.Drawing.ExecutorB",
                 Role = ReferenceRole.Write,
             },

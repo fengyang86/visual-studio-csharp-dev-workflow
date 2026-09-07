@@ -21,3 +21,5 @@ artifacts/plugin-staging/
 appsettings.Local.json
 *.secrets.json
 *.db-journal
+HANDOFF.md
+README.local.md

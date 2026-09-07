@@ -1,7 +1,7 @@
 # Visual Studio C# Dev Workflow 下一代架构
 
-状态：架构基线，阶段 B/C/I/J/K/L/M 已落地源码侧。
-日期：2026-06-05。
+状态：架构基线，阶段 B/C/I/J/K/L/M 已落地源码侧。  
+日期：2026-06-05。  
 范围：面向 AI 辅助 C# 开发的整体能力升级；当前文档同时记录已落地源码侧能力和后续工作边界。
 
 > 2026-06-12 更新：后续增强主线升级为 **Agentic C# Dev Workflow Hub**，新的架构设计见 `docs/agentic-csharp-dev-workflow-architecture.md`。本文档保留为 v1 下一代架构和已落地能力追溯。

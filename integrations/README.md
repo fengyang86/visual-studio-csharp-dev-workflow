@@ -23,11 +23,12 @@ provider settings and avoids accidentally overwriting other MCP servers.
 | Host | Status | Integration surface |
 | --- | --- | --- |
 | Codex | Supported | Packaged personal plugin, skill, and MCP configuration |
+| DeepSeekHarness | Supported | Cordis patch integration (`cordis.patch.yml`), generated fragments, and the packaged `Install-DshMcpServer.ps1` installer |
 | Claude Code | Configuration ready | Standard project or user MCP JSON configuration; E3 smoke pending |
-| DeepSeekHarness | Experimental | Standard MCP JSON fragment; validate the target Harness version before calling it supported |
 
-The DeepSeekHarness project is distributed independently of this repository.
-Its public desktop packaging documentation does not establish a stable,
-versioned MCP configuration location. The template is intentionally generic;
-record the exact Harness version and successful configuration path when a real
-integration smoke test is performed.
+DeepSeekHarness registers stdio MCP servers through a Cordis patch layer that
+instantiates the bundled `@deepseek-ai/dsh-mcp-client` plugin; it does not
+consume an `mcpServers` JSON file. See
+[deepseek-harness/README.md](deepseek-harness/README.md) for patch locations,
+hot-reload behavior, and the support gate that records the exact DSH version
+and `cordis.patch.yml` path used by each verified smoke test.

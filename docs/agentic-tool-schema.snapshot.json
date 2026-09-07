@@ -1,6 +1,6 @@
 {
-  "generatedAtUtc": "2026-06-26T11:16:48.241516+00:00",
-  "toolCount": 82,
+  "generatedAtUtc": "2026-09-07T07:39:55.2857909+00:00",
+  "toolCount": 83,
   "resourceTemplateCount": 15,
   "tools": [
     {
@@ -958,6 +958,83 @@
         "idempotentHint": true,
         "openWorldHint": null,
         "readOnlyHint": true
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "batch_evaluate_debug_expressions",
+      "title": null,
+      "description": "Evaluate up to 20 expressions in the same Visual Studio debugger frame with one MCP tool call. Requires break mode; side effects must be explicitly allowed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "expressions": {
+            "description": "Expressions to evaluate. Empty expressions are rejected; duplicates are evaluated once.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "frameId": {
+            "description": "Optional frame id returned by get_debug_call_stack. When omitted, the current frame is used.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "maxChildren": {
+            "description": "Maximum children to include per expandable value.",
+            "type": "integer",
+            "default": 20
+          },
+          "maxStringLength": {
+            "description": "Maximum string length per expression value.",
+            "type": "integer",
+            "default": 500
+          },
+          "allowSideEffects": {
+            "description": "Whether evaluation may invoke debugger-side effects.",
+            "type": "boolean",
+            "default": false
+          },
+          "targetPipeName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "expressions"
+        ]
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": false,
+        "openWorldHint": null,
+        "readOnlyHint": false
       },
       "execution": {
         "taskSupport": "optional"
@@ -3354,7 +3431,7 @@
           },
           "expectedToolCount": {
             "type": "integer",
-            "default": 82
+            "default": 83
           },
           "targetPipeName": {
             "type": [
@@ -4093,6 +4170,24 @@
             "description": "Whether generated code should be included when the bridge supports it.",
             "type": "boolean",
             "default": false
+          },
+          "detailLevel": {
+            "description": "Response detail level: Compact returns only the decision-ready summary, Standard returns bounded supporting evidence, and Full embeds the complete task package when within budget.",
+            "type": "string",
+            "enum": [
+              "Compact",
+              "Standard",
+              "Full"
+            ],
+            "default": "Compact"
+          },
+          "workspaceContextLeaseId": {
+            "description": "Optional workspace context lease returned by a previous task. Reuses its resolved bridge pipe and avoids repeated discovery.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           },
           "targetPipeName": {
             "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
@@ -5449,6 +5544,24 @@
             "type": "boolean",
             "default": false
           },
+          "detailLevel": {
+            "description": "Response detail level: Compact returns only the decision-ready summary, Standard returns bounded supporting evidence, and Full embeds the complete task package when within budget.",
+            "type": "string",
+            "enum": [
+              "Compact",
+              "Standard",
+              "Full"
+            ],
+            "default": "Compact"
+          },
+          "workspaceContextLeaseId": {
+            "description": "Optional workspace context lease returned by a previous task. Reuses its resolved bridge pipe and avoids repeated discovery.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
           "targetPipeName": {
             "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
@@ -5667,6 +5780,24 @@
             "type": "boolean",
             "default": false
           },
+          "detailLevel": {
+            "description": "Response detail level: Compact returns only the decision-ready summary, Standard returns bounded supporting evidence, and Full embeds the complete task package when within budget.",
+            "type": "string",
+            "enum": [
+              "Compact",
+              "Standard",
+              "Full"
+            ],
+            "default": "Compact"
+          },
+          "workspaceContextLeaseId": {
+            "description": "Optional workspace context lease returned by a previous task. Reuses its resolved bridge pipe and avoids repeated discovery.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
           "targetPipeName": {
             "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
@@ -5878,6 +6009,24 @@
             "description": "Whether generated code should be included when the bridge supports it.",
             "type": "boolean",
             "default": false
+          },
+          "detailLevel": {
+            "description": "Response detail level: Compact returns only the decision-ready summary, Standard returns bounded supporting evidence, and Full embeds the complete task package when within budget.",
+            "type": "string",
+            "enum": [
+              "Compact",
+              "Standard",
+              "Full"
+            ],
+            "default": "Compact"
+          },
+          "workspaceContextLeaseId": {
+            "description": "Optional workspace context lease returned by a previous task. Reuses its resolved bridge pipe and avoids repeated discovery.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           },
           "targetPipeName": {
             "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",

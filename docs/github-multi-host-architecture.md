@@ -1,7 +1,7 @@
 # GitHub 多宿主分发架构
 
-状态：实施中。
-日期：2026-08-17。
+状态：实施中。  
+日期：2026-08-17。  
 范围：将 Visual Studio C# Dev Workflow 作为可公开协作的 GitHub 工程发布，并在不复制核心实现的前提下支持 Codex、Claude Code 和 DeepSeekHarness。
 
 ## 目标与边界
@@ -42,17 +42,17 @@ flowchart LR
 
 | 能力 | Codex | Claude Code | DeepSeekHarness |
 | --- | --- | --- | --- |
-| MCP stdio server | 正式支持 | 配置适配已具备，待 E3 smoke | 实验性，待版本验证 |
+| MCP stdio server | 正式支持 | 配置适配已具备，待 E3 smoke | 已支持（Cordis patch 集成，2026-09-07 在 DSH 0.2.2 完成 E3 smoke） |
 | 任务级工作流指导 | Codex plugin skill | 仓库说明 / 项目指令 | 仓库说明 / 宿主提示词 |
 | VSIX 安装 | 包内显式脚本 | 共用显式脚本 | 共用显式脚本 |
-| 用户配置自动写入 | Codex installer | 不做，提供片段 | 不做，提供片段 |
-| 真实端到端 smoke | 已完成 | 发布前应完成 | 发布前必须完成 |
+| 用户配置自动写入 | Codex installer | 不做，提供片段 | 提供 `Install-DshMcpServer.ps1`，带备份写入 cordis patch |
+| 真实端到端 smoke | 已完成 | 发布前应完成 | 已完成 |
 
-Codex 是增强入口而不是核心依赖。Claude Code 和 DeepSeekHarness 没有与 Codex 等价的个人插件机制时，仍可通过标准 MCP 使用 82 个工具和 15 个资源模板。
+Codex 是增强入口而不是核心依赖。Claude Code 和 DeepSeekHarness 没有与 Codex 等价的个人插件机制时，仍可通过标准 MCP 使用 83 个工具和 15 个资源模板。DeepSeekHarness 不消费 `mcpServers` JSON；它通过 Cordis patch 层（`cordis.patch.yml`）实例化内置 `@deepseek-ai/dsh-mcp-client` 插件来启动 stdio MCP server，工具名前缀为 `mcp__visual_studio_csharp_navigator__`。
 
 ## 配置契约
 
-共享 MCP 配置的最小形态：
+Codex / Claude Code 共享 MCP 配置的最小形态：
 
 ```json
 {
@@ -70,6 +70,22 @@ Codex 是增强入口而不是核心依赖。Claude Code 和 DeepSeekHarness 没
 - `VisualStudioBridge__ConnectTimeoutMilliseconds`
 - `VisualStudioBridge__DiscoveryStaleAfterSeconds`
 
+DeepSeekHarness 使用 Cordis patch 条目而不是上面的 JSON 形态：
+
+```yaml
+- insert:
+    - id: mcp-visual-studio-csharp-navigator
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: visual_studio_csharp_navigator
+        transport: stdio
+        command: '<absolute path to VisualStudio.CSharpNavigator.Server.exe>'
+        args: []
+        env:
+          VisualStudioBridge__ConnectTimeoutMilliseconds: '5000'
+          VisualStudioBridge__DiscoveryStaleAfterSeconds: '120'
+```
+
 用户配置只可由用户或显式安装命令修改。仓库脚本默认生成独立片段，避免错误覆盖已有 MCP servers、模型供应商或其他客户端设置。
 
 ## 验证标准
@@ -86,4 +102,4 @@ Codex 是增强入口而不是核心依赖。Claude Code 和 DeepSeekHarness 没
 
 - GitHub Release 只分发可重复生成的 zip、VSIX 和哈希，不提交 runtime、staging 或个人缓存目录。
 - `SECURITY.md` 处理安全报告；`CONTRIBUTING.md` 约束 issue、验证和敏感信息。
-- 许可证尚未锁定。发布前由仓库所有者选择 MIT 或 Apache-2.0，并确认第三方依赖的许可证兼容性。
+- 许可证已选定 Apache-2.0（见 `LICENSE` 与 `NOTICE`）；发布快照保留第三方依赖许可审计要求。

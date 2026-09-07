@@ -2681,7 +2681,7 @@ sealed record TestProfile(
             "realproject",
             ReadSetting("CODE_NAVIGATOR_TEST_SOLUTION")
                 ?? ReadSetting("VisualStudioBridge__SolutionPath")
-                ?? @"D:\Samples\SampleWorkspace\SampleWorkspace.sln",
+                ?? @"D:\WorkCodes\SampleWorkspaceFork\SampleWorkspace.sln",
             targetPipeName,
             targetInstanceId,
             ReadSetting("CODE_NAVIGATOR_TEST_SYMBOL") ?? "SetProps",
@@ -2689,7 +2689,7 @@ sealed record TestProfile(
             ReadSetting("CODE_NAVIGATOR_TEST_EXPECTED_CONTAINING_TYPE") ?? "SampleWorkspace.Core.LcObject",
             ReadSetting("CODE_NAVIGATOR_TEST_PROJECT") ?? "SampleWorkspace.Core",
             ReadSetting("CODE_NAVIGATOR_TEST_DOCUMENT")
-                ?? @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\Elements\Basic\LcLine.cs",
+                ?? @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\Elements\Basic\LcLine.cs",
             ReadIntSetting("CODE_NAVIGATOR_TEST_LINE", 15),
             ReadIntSetting("CODE_NAVIGATOR_TEST_COLUMN", 20));
     }

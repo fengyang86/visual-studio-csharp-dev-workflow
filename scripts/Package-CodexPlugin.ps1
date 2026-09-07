@@ -7,6 +7,9 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
 
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$Version = "0.1.0",
+
     [switch]$Build,
 
     [switch]$NoRestore,
@@ -108,9 +111,12 @@ function Get-ServerProcesses {
 }
 
 function Write-PluginManifest {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [string]$Version
+    )
 
-    $pluginVersion = "0.1.0+codex." + ([DateTime]::UtcNow.ToString("yyyyMMddHHmmss"))
+    $pluginVersion = "$Version+codex." + ([DateTime]::UtcNow.ToString("yyyyMMddHHmmss"))
     $manifest = [ordered]@{
         name = $PluginName
         version = $pluginVersion
@@ -490,7 +496,7 @@ Copy-Item -LiteralPath $sourceVsix -Destination $pluginVsix -Force
 Copy-Item -LiteralPath $installScript -Destination (Join-Path $pluginScriptsDir "Install-VisualStudioCSharpNavigator.ps1") -Force
 
 Write-Section "Write plugin config"
-Write-PluginManifest -Path (Join-Path $pluginManifestDir "plugin.json")
+Write-PluginManifest -Path (Join-Path $pluginManifestDir "plugin.json") -Version $Version
 Write-McpConfig -Path (Join-Path $PluginPath ".mcp.json") -ServerExe $pluginServerExe
 Clear-DirectoryContent $pluginSkillsRoot
 New-Item -ItemType Directory -Path $primarySkillDir -Force | Out-Null

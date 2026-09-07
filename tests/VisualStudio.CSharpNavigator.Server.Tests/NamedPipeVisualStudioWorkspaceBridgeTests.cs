@@ -33,7 +33,7 @@ public sealed class NamedPipeVisualStudioWorkspaceBridgeTests
         var status = Assert.Single(result.Items);
         Assert.False(result.IsPartial);
         Assert.True(status.IsSolutionLoaded);
-        Assert.Equal(@"D:\Samples\SampleWorkspace\SampleWorkspace.sln", status.SolutionPath);
+        Assert.Equal(@"D:\WorkCodes\SampleWorkspaceFork\SampleWorkspace.sln", status.SolutionPath);
         Assert.Equal("SampleWorkspace", status.SolutionName);
         Assert.Equal(123, status.ProjectCount);
         Assert.Equal(4567, status.DocumentCount);
@@ -42,7 +42,7 @@ public sealed class NamedPipeVisualStudioWorkspaceBridgeTests
         Assert.Equal(new[] { "SampleWorkspace.App" }, status.StartupProjects);
         var project = Assert.Single(status.Projects);
         Assert.Equal("SampleWorkspace.Core", project.ProjectName);
-        Assert.Equal(@"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\SampleWorkspace.Core.csproj", project.FilePath);
+        Assert.Equal(@"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\SampleWorkspace.Core.csproj", project.FilePath);
         Assert.Equal("C#", project.Language);
         Assert.Equal(new[] { "net8.0" }, project.TargetFrameworks);
     }
@@ -151,13 +151,13 @@ public sealed class NamedPipeVisualStudioWorkspaceBridgeTests
         using var discovery = new TemporaryDirectory();
         var selectedPipe = "VisualStudio.CSharpNavigator.Tests." + Guid.NewGuid();
         WriteInstance(discovery.Path, "vs-a", Environment.ProcessId, @"D:\WorkCodes\A\A.sln", "pipe-a");
-        WriteInstance(discovery.Path, "vs-realproject", Environment.ProcessId, @"D:\Samples\SampleWorkspace\SampleWorkspace.sln", selectedPipe);
+        WriteInstance(discovery.Path, "vs-realproject", Environment.ProcessId, @"D:\WorkCodes\SampleWorkspaceFork\SampleWorkspace.sln", selectedPipe);
         var serverTask = RunWorkspaceStatusResponseServerAsync(selectedPipe);
 
         var bridge = CreateBridge(new NamedPipeBridgeOptions
         {
             DiscoveryDirectory = discovery.Path,
-            SolutionPath = @"D:\Samples\SampleWorkspace\SampleWorkspace.sln",
+            SolutionPath = @"D:\WorkCodes\SampleWorkspaceFork\SampleWorkspace.sln",
             ConnectTimeoutMilliseconds = 5000,
         });
 
@@ -166,7 +166,7 @@ public sealed class NamedPipeVisualStudioWorkspaceBridgeTests
         await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
         var status = Assert.Single(result.Items);
         Assert.False(result.IsPartial);
-        Assert.Equal(@"D:\Samples\SampleWorkspace\SampleWorkspace.sln", status.SolutionPath);
+        Assert.Equal(@"D:\WorkCodes\SampleWorkspaceFork\SampleWorkspace.sln", status.SolutionPath);
     }
 
     [Fact]
@@ -267,7 +267,7 @@ public sealed class NamedPipeVisualStudioWorkspaceBridgeTests
         var status = Assert.Single(result.Items);
         Assert.False(result.IsPartial);
         Assert.True(status.IsSolutionLoaded);
-        Assert.Equal(@"D:\Samples\SampleWorkspace\SampleWorkspace.sln", status.SolutionPath);
+        Assert.Equal(@"D:\WorkCodes\SampleWorkspaceFork\SampleWorkspace.sln", status.SolutionPath);
     }
 
     [Fact]
@@ -477,7 +477,7 @@ public sealed class NamedPipeVisualStudioWorkspaceBridgeTests
 
         const string responseJson =
             """
-            {"protocolVersion":"1","result":{"items":[{"isSolutionLoaded":true,"solutionPath":"D:\\Samples\\SampleWorkspace\\SampleWorkspace.sln","solutionName":"SampleWorkspace","projectCount":123,"documentCount":4567,"activeConfigurationName":"Debug","activePlatformName":"Any CPU","startupProjects":["SampleWorkspace.App"],"projects":[{"projectName":"SampleWorkspace.Core","filePath":"D:\\Samples\\SampleWorkspace\\src\\SampleWorkspace.Core\\SampleWorkspace.Core.csproj","language":"C#","targetFrameworks":["net8.0"]}],"isProjectListPartial":false}],"diagnostics":[],"isPartial":false}}
+            {"protocolVersion":"1","result":{"items":[{"isSolutionLoaded":true,"solutionPath":"D:\\WorkCodes\\SampleWorkspaceFork\\SampleWorkspace.sln","solutionName":"SampleWorkspace","projectCount":123,"documentCount":4567,"activeConfigurationName":"Debug","activePlatformName":"Any CPU","startupProjects":["SampleWorkspace.App"],"projects":[{"projectName":"SampleWorkspace.Core","filePath":"D:\\WorkCodes\\SampleWorkspaceFork\\src\\SampleWorkspace.Core\\SampleWorkspace.Core.csproj","language":"C#","targetFrameworks":["net8.0"]}],"isProjectListPartial":false}],"diagnostics":[],"isPartial":false}}
             """;
         await writer.WriteLineAsync(responseJson);
     }
@@ -506,7 +506,7 @@ public sealed class NamedPipeVisualStudioWorkspaceBridgeTests
 
         const string responseJson =
             """
-            {"protocolVersion":"1","result":{"items":[{"key":{"value":"M:SampleWorkspace.Sample.SetProps"},"name":"SetProps","containingType":"Sample","containingNamespace":"SampleWorkspace","projectName":"SampleWorkspace.Sample","kind":3,"span":{"filePath":"D:\\Samples\\SampleWorkspace\\Sample.cs","startLine":42,"startColumn":9,"endLine":42,"endColumn":17}}],"diagnostics":[],"isPartial":false}}
+            {"protocolVersion":"1","result":{"items":[{"key":{"value":"M:SampleWorkspace.Sample.SetProps"},"name":"SetProps","containingType":"Sample","containingNamespace":"SampleWorkspace","projectName":"SampleWorkspace.Sample","kind":3,"span":{"filePath":"D:\\WorkCodes\\SampleWorkspaceFork\\Sample.cs","startLine":42,"startColumn":9,"endLine":42,"endColumn":17}}],"diagnostics":[],"isPartial":false}}
             """;
         await writer.WriteLineAsync(responseJson);
     }

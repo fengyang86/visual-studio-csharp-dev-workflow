@@ -3639,7 +3639,7 @@ public sealed class CodeNavigationToolsTests
         var tools = new CodeNavigationTools(bridge);
 
         await tools.FindCSharpRelatedTests(
-            filePath: @"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\LcObject.cs",
+            filePath: @"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\LcObject.cs",
             maxResults: 25,
             cancellationToken: CancellationToken.None);
 
@@ -3647,7 +3647,7 @@ public sealed class CodeNavigationToolsTests
         Assert.NotNull(bridge.LastRelatedTestsRequest);
         Assert.Null(bridge.LastRelatedTestsRequest.SymbolKey);
         Assert.Null(bridge.LastRelatedTestsRequest.Position);
-        Assert.Equal(@"D:\Samples\SampleWorkspace\src\SampleWorkspace.Core\LcObject.cs", bridge.LastRelatedTestsRequest.FilePath);
+        Assert.Equal(@"D:\WorkCodes\SampleWorkspaceFork\src\SampleWorkspace.Core\LcObject.cs", bridge.LastRelatedTestsRequest.FilePath);
         Assert.Equal(25, bridge.LastRelatedTestsRequest.MaxResults);
     }
 
@@ -3780,7 +3780,7 @@ public sealed class CodeNavigationToolsTests
 
         var result = await tools.FindCSharpReferences(
             null,
-            @"D:\Samples\SampleWorkspace\SomeFile.cs",
+            @"D:\WorkCodes\SampleWorkspaceFork\SomeFile.cs",
             0,
             1,
             cancellationToken: CancellationToken.None);
@@ -3813,7 +3813,7 @@ public sealed class CodeNavigationToolsTests
 
         var result = await tools.FindCSharpReferences(
             "M:SampleWorkspace.Sample.SetProps",
-            @"D:\Samples\SampleWorkspace\SomeFile.cs",
+            @"D:\WorkCodes\SampleWorkspaceFork\SomeFile.cs",
             null,
             null,
             cancellationToken: CancellationToken.None);

@@ -1,7 +1,7 @@
 # Agentic MCP Tool Contract Audit
 
-状态：R0 基线审计与 R12 Agent 工作包契约已更新。
-日期：2026-06-26。
+状态：R0 基线审计与 R12 Agent 工作包契约已更新。  
+日期：2026-06-26。  
 目标：冻结当前 Visual Studio C# Dev Workflow 对外工具契约，作为 Agentic V2 重构期间的兼容基线。
 
 ## 基线

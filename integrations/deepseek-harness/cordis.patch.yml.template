@@ -1,0 +1,23 @@
+# DeepSeekHarness Cordis patch for visual_studio_csharp_navigator (stdio MCP).
+#
+# DeepSeekHarness does not use an mcpServers JSON file. It registers stdio MCP
+# servers as instances of the bundled @deepseek-ai/dsh-mcp-client plugin through
+# a Cordis patch layer. Merge the single list entry below into one of:
+#   - <DSH_HOME>\profiles\<profile>\cordis.patch.yml   (one profile)
+#   - <DSH_HOME>\cordis.patch.yml                      (all profiles)
+# If the target file currently contains only [], replace the whole file with
+# this list. Both patch files are hot-reloaded by a running DSH session.
+#
+# Replace __ABSOLUTE_PATH_TO_VisualStudio.CSharpNavigator.Server.exe__ with the
+# absolute path to the published MCP server executable.
+- insert:
+    - id: mcp-visual-studio-csharp-navigator
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: visual_studio_csharp_navigator
+        transport: stdio
+        command: '__ABSOLUTE_PATH_TO_VisualStudio.CSharpNavigator.Server.exe__'
+        args: []
+        env:
+          VisualStudioBridge__ConnectTimeoutMilliseconds: '5000'
+          VisualStudioBridge__DiscoveryStaleAfterSeconds: '120'
