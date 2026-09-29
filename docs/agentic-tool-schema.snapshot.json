@@ -1,6 +1,6 @@
 {
-  "generatedAtUtc": "2026-09-07T07:39:55.2857909+00:00",
-  "toolCount": 83,
+  "generatedAtUtc": "2026-09-22T07:45:09.5013544+00:00",
+  "toolCount": 96,
   "resourceTemplateCount": 15,
   "tools": [
     {
@@ -141,11 +141,12 @@
     {
       "name": "analyze_csharp_symbol_impact",
       "title": null,
-      "description": "Aggregate real Roslyn references for one C# symbol and summarize affected projects, files, roles, and containing types.",
+      "description": "Aggregate real Roslyn references for one C# symbol and summarize affected projects, files, roles, and containing types. maxDepth \u003E 1 propagates through callers transitively.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -153,6 +154,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -160,6 +162,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -167,6 +170,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -174,30 +178,37 @@
             "default": null
           },
           "maxDepth": {
+            "description": "Recursion depth 1..10 for transitive caller propagation; 1 aggregates direct references only.",
             "type": "integer",
             "default": 1
           },
           "maxResults": {
+            "description": "Maximum reference sites to process before marking the summary partial.",
             "type": "integer",
             "default": 1000
           },
           "maxProjects": {
+            "description": "Maximum distinct projects in the summary groups.",
             "type": "integer",
             "default": 20
           },
           "maxFiles": {
+            "description": "Maximum distinct files in the summary groups.",
             "type": "integer",
             "default": 20
           },
           "maxContainingTypes": {
+            "description": "Maximum distinct containing types in the summary groups.",
             "type": "integer",
             "default": 20
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -205,6 +216,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -212,6 +224,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -774,6 +787,115 @@
       "_meta": null
     },
     {
+      "name": "apply_csharp_text_edits",
+      "title": null,
+      "description": "Apply previously reviewed plain text edits to one C# document through VisualStudioWorkspace.TryApplyChanges so open buffers update in place without reload prompts. Requires an explicit target and user approval; preview_csharp_text_edits first. Blocks on truncated previews and generated-document changes unless the matching allow flag is set.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "description": "Absolute path of the target document in the active solution.",
+            "type": "string"
+          },
+          "edits": {
+            "description": "Edits as 1-based line/column ranges with an EXCLUSIVE end position; columns are character offsets (1 = first character, line length \u002B 1 = end of line). Edits must not overlap.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "startLine": {
+                  "type": "integer"
+                },
+                "startColumn": {
+                  "type": "integer"
+                },
+                "endLine": {
+                  "type": "integer"
+                },
+                "endColumn": {
+                  "type": "integer"
+                },
+                "newText": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "allowGeneratedDocumentChanges": {
+            "description": "Allow applying changes that touch generated documents; requires includeGeneratedCode=true.",
+            "type": "boolean",
+            "default": false
+          },
+          "allowUnsupportedDocumentChanges": {
+            "description": "Allow applying when the preview reported unsupported (non text-diff) document changes.",
+            "type": "boolean",
+            "default": false
+          },
+          "allowTruncatedPreview": {
+            "description": "Allow applying when the preview was truncated.",
+            "type": "boolean",
+            "default": false
+          },
+          "maxTextChanges": {
+            "description": "Maximum text changes included in the preview evidence.",
+            "type": "integer",
+            "default": 200
+          },
+          "maxSnippetLength": {
+            "description": "Maximum characters per old/new snippet in the preview evidence.",
+            "type": "integer",
+            "default": 200
+          },
+          "includeGeneratedCode": {
+            "description": "Allow targeting generated documents such as .Designer.cs and source-generated files.",
+            "type": "boolean",
+            "default": false
+          },
+          "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "filePath",
+          "edits"
+        ]
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": false,
+        "openWorldHint": null,
+        "readOnlyHint": false
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
       "name": "audit_csharp_area",
       "title": null,
       "description": "Create a compact read-only audit package for a C# area by combining area paths, query terms, scoped diagnostics, symbol candidates, related tests, temporary markers, and next actions.",
@@ -1050,6 +1172,7 @@
         "type": "object",
         "properties": {
           "positions": {
+            "description": "Source positions (filePath/line/column) to fetch, typically build diagnostics or debugger frames.",
             "type": "array",
             "items": {
               "type": "object",
@@ -1073,22 +1196,27 @@
             }
           },
           "contextLines": {
+            "description": "Lines of context to include around each enclosing member.",
             "type": "integer",
             "default": 3
           },
           "maxCharsPerPosition": {
+            "description": "Maximum characters of snippet text per position.",
             "type": "integer",
             "default": 12000
           },
           "maxPositions": {
+            "description": "Maximum positions to process in one call.",
             "type": "integer",
             "default": 20
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -1096,6 +1224,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -1103,6 +1232,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -1136,6 +1266,7 @@
         "type": "object",
         "properties": {
           "symbols": {
+            "description": "Symbol keys or source positions to fetch; each entry is a symbolKey or a filePath/line/column triple.",
             "type": "array",
             "items": {
               "type": "object",
@@ -1159,26 +1290,32 @@
             }
           },
           "contextLines": {
+            "description": "Lines of context to include around each declaration.",
             "type": "integer",
             "default": 3
           },
           "maxCharsPerSymbol": {
+            "description": "Maximum characters of snippet text per symbol.",
             "type": "integer",
             "default": 12000
           },
           "maxSnippetsPerSymbol": {
+            "description": "Maximum snippets per symbol.",
             "type": "integer",
             "default": 3
           },
           "maxSymbols": {
+            "description": "Maximum symbols to process in one call.",
             "type": "integer",
             "default": 20
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -1186,6 +1323,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -1193,6 +1331,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -1226,6 +1365,160 @@
         "type": "object",
         "properties": {
           "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "timeoutMilliseconds": {
+            "description": "How long to wait for the debugger action to complete, in milliseconds (1000-60000).",
+            "type": "integer",
+            "default": 10000
+          }
+        }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": false,
+        "openWorldHint": null,
+        "readOnlyHint": false
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "capture_csharp_diagnostic_baseline",
+      "title": null,
+      "description": "Capture a bounded Roslyn diagnostic baseline for a specific scope. The baseline is local, expires after 30 minutes, and cannot be used with a different scope.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "includePathPatterns": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "excludePathPatterns": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "changedFiles": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "projectName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "minimumSeverity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "Hidden",
+              "Info",
+              "Warning",
+              "Error",
+              null
+            ],
+            "default": null
+          },
+          "noiseProfile": {
+            "type": "string",
+            "enum": [
+              "Penalize",
+              "Filter",
+              "Off",
+              "Auto"
+            ],
+            "default": "Auto"
+          },
+          "collectionMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
+            ],
+            "default": "Auto"
+          },
+          "maxResults": {
+            "type": "integer",
+            "default": 500
+          },
+          "maxProjects": {
+            "type": "integer",
+            "default": 0
+          },
+          "maxElapsedMilliseconds": {
+            "type": "integer",
+            "default": 45000
+          },
+          "includeGeneratedCode": {
+            "type": "boolean",
+            "default": false
+          },
+          "targetPipeName": {
             "type": [
               "string",
               "null"
@@ -1245,10 +1538,6 @@
               "null"
             ],
             "default": null
-          },
-          "timeoutMilliseconds": {
-            "type": "integer",
-            "default": 10000
           }
         }
       },
@@ -1256,9 +1545,9 @@
       "annotations": {
         "title": null,
         "destructiveHint": null,
-        "idempotentHint": false,
+        "idempotentHint": true,
         "openWorldHint": null,
-        "readOnlyHint": false
+        "readOnlyHint": true
       },
       "execution": {
         "taskSupport": "optional"
@@ -1500,12 +1789,117 @@
       "_meta": null
     },
     {
-      "name": "continue_debugging",
+      "name": "compare_csharp_diagnostics_to_baseline",
       "title": null,
-      "description": "Continue the paused debugger in the targeted Visual Studio instance. This mutates debugger state and requires an explicit target.",
+      "description": "Compare scoped Roslyn diagnostics with a previously captured baseline. New versus pre-existing is reported only when scope matches and the current query is complete.",
       "inputSchema": {
         "type": "object",
         "properties": {
+          "baselineId": {
+            "type": "string"
+          },
+          "filePath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "includePathPatterns": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "excludePathPatterns": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "changedFiles": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "projectName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "minimumSeverity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "Hidden",
+              "Info",
+              "Warning",
+              "Error",
+              null
+            ],
+            "default": null
+          },
+          "noiseProfile": {
+            "type": "string",
+            "enum": [
+              "Penalize",
+              "Filter",
+              "Off",
+              "Auto"
+            ],
+            "default": "Auto"
+          },
+          "collectionMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
+            ],
+            "default": "Auto"
+          },
+          "maxResults": {
+            "type": "integer",
+            "default": 500
+          },
+          "maxProjects": {
+            "type": "integer",
+            "default": 0
+          },
+          "maxElapsedMilliseconds": {
+            "type": "integer",
+            "default": 45000
+          },
+          "includeGeneratedCode": {
+            "type": "boolean",
+            "default": false
+          },
           "targetPipeName": {
             "type": [
               "string",
@@ -1526,8 +1920,59 @@
               "null"
             ],
             "default": null
+          }
+        },
+        "required": [
+          "baselineId"
+        ]
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": true,
+        "openWorldHint": null,
+        "readOnlyHint": true
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "continue_debugging",
+      "title": null,
+      "description": "Continue the paused debugger in the targeted Visual Studio instance. This mutates debugger state and requires an explicit target.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           },
           "timeoutMilliseconds": {
+            "description": "How long to wait for the debugger action to complete, in milliseconds (1000-60000).",
             "type": "integer",
             "default": 10000
           }
@@ -1555,6 +2000,7 @@
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -1562,6 +2008,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -1569,6 +2016,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -1576,6 +2024,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -1583,10 +2032,12 @@
             "default": null
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -1594,6 +2045,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -1601,6 +2053,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -1626,14 +2079,16 @@
     {
       "name": "enable_debug_breakpoint",
       "title": null,
-      "description": "Enable or disable exactly one breakpoint by breakpoint name or absolute file path and line in the targeted Visual Studio instance. Requires an explicit target.",
+      "description": "Enable or disable a breakpoint by name or file/line in the targeted Visual Studio instance. This mutates debugger state and requires an explicit target.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "enabled": {
+            "description": "true to enable the breakpoint, false to disable it.",
             "type": "boolean"
           },
           "breakpointName": {
+            "description": "Breakpoint name from list_debug_breakpoints, if known.",
             "type": [
               "string",
               "null"
@@ -1641,6 +2096,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of the source file (alternative to breakpointName).",
             "type": [
               "string",
               "null"
@@ -1648,6 +2104,7 @@
             "default": null
           },
           "line": {
+            "description": "One-based line number (used with filePath).",
             "type": [
               "integer",
               "null"
@@ -1655,6 +2112,7 @@
             "default": null
           },
           "column": {
+            "description": "One-based column (used with filePath).",
             "type": [
               "integer",
               "null"
@@ -1662,6 +2120,7 @@
             "default": null
           },
           "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
             "type": [
               "string",
               "null"
@@ -1669,6 +2128,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
             "type": [
               "string",
               "null"
@@ -1676,15 +2136,12 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
             ],
             "default": null
-          },
-          "timeoutMilliseconds": {
-            "type": "integer",
-            "default": 10000
           }
         },
         "required": [
@@ -1783,51 +2240,60 @@
       "_meta": null
     },
     {
-      "name": "find_csharp_callees",
+      "name": "execute_csharp_debug_scenario",
       "title": null,
-      "description": "Find C# callees used by symbol declaration bodies using Roslyn semantic analysis and return call graph edges with source spans.",
+      "description": "Execute a bounded C# debug scenario with explicit Visual Studio target, owned breakpoint/session cleanup, stop snapshots, and artifact evidence.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "symbolKey": {
+          "scenarioName": {
             "type": [
               "string",
               "null"
             ],
             "default": null
           },
-          "filePath": {
+          "problemText": {
             "type": [
               "string",
               "null"
             ],
             "default": null
           },
-          "line": {
+          "breakpointFilePath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "breakpointLine": {
             "type": [
               "integer",
               "null"
             ],
             "default": null
           },
-          "column": {
+          "artifactPaths": {
             "type": [
-              "integer",
+              "array",
               "null"
             ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "default": null
           },
-          "maxDepth": {
-            "type": "integer",
-            "default": 1
-          },
-          "maxResults": {
-            "type": "integer",
-            "default": 100
-          },
-          "includeGeneratedCode": {
+          "stopDebuggingAtEnd": {
             "type": "boolean",
-            "default": false
+            "default": true
+          },
+          "waitTimeoutMilliseconds": {
+            "type": "integer",
+            "default": 30000
           },
           "targetPipeName": {
             "type": [
@@ -1856,6 +2322,199 @@
       "annotations": {
         "title": null,
         "destructiveHint": null,
+        "idempotentHint": false,
+        "openWorldHint": null,
+        "readOnlyHint": false
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "execute_csharp_verification",
+      "title": null,
+      "description": "Run a bounded structured dotnet build or test for one solution/project path, capture bounded output, and return ranked failure evidence.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetPath": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "Build",
+              "Test"
+            ],
+            "default": "Build"
+          },
+          "configuration": {
+            "type": "string",
+            "default": "Release"
+          },
+          "testFilter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "noRestore": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeoutMilliseconds": {
+            "type": "integer",
+            "default": 300000
+          },
+          "maxOutputCharacters": {
+            "type": "integer",
+            "default": 100000
+          },
+          "includePathPatterns": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "excludePathPatterns": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "changedFiles": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          }
+        },
+        "required": [
+          "targetPath"
+        ]
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": false,
+        "openWorldHint": null,
+        "readOnlyHint": false
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "find_csharp_callees",
+      "title": null,
+      "description": "Find C# callees used by symbol declaration bodies using Roslyn semantic analysis and return call graph edges with source spans. maxDepth \u003E 1 expands transitively with BFS and deduplication.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "line": {
+            "description": "1-based line number of the source position.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          },
+          "column": {
+            "description": "1-based column (character offset) of the source position.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          },
+          "maxDepth": {
+            "description": "Recursion depth 1..10; 1 returns direct callees only.",
+            "type": "integer",
+            "default": 1
+          },
+          "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
+            "type": "integer",
+            "default": 100
+          },
+          "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
+            "type": "boolean",
+            "default": false
+          },
+          "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
         "idempotentHint": true,
         "openWorldHint": null,
         "readOnlyHint": true
@@ -1869,11 +2528,12 @@
     {
       "name": "find_csharp_callers",
       "title": null,
-      "description": "Find C# callers of a symbol using Roslyn references and return call graph edges with source spans.",
+      "description": "Find C# callers of a symbol using Roslyn references and return call graph edges with source spans. maxDepth \u003E 1 expands transitively with BFS and deduplication.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -1881,6 +2541,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -1888,6 +2549,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -1895,6 +2557,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -1902,18 +2565,22 @@
             "default": null
           },
           "maxDepth": {
+            "description": "Recursion depth 1..10; 1 returns direct callers only.",
             "type": "integer",
             "default": 1
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
             "default": 100
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -1921,6 +2588,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -1928,6 +2596,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -1958,6 +2627,7 @@
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -1965,6 +2635,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -1972,6 +2643,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -1979,6 +2651,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -1986,14 +2659,17 @@
             "default": null
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
-            "default": 1000
+            "default": 300
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2001,6 +2677,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2008,6 +2685,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2038,6 +2716,7 @@
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -2045,6 +2724,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -2052,6 +2732,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -2059,6 +2740,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -2066,18 +2748,22 @@
             "default": null
           },
           "transitive": {
+            "description": "true walks the whole hierarchy below the type; false returns direct descendants only.",
             "type": "boolean",
             "default": true
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
             "default": 1000
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2085,6 +2771,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2092,6 +2779,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2122,6 +2810,7 @@
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -2129,6 +2818,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -2136,6 +2826,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -2143,6 +2834,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -2150,14 +2842,17 @@
             "default": null
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
-            "default": 1000
+            "default": 300
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2165,6 +2860,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2172,6 +2868,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2202,6 +2899,7 @@
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -2209,6 +2907,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -2216,6 +2915,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -2223,6 +2923,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -2230,14 +2931,17 @@
             "default": null
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
-            "default": 1000
+            "default": 300
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2245,6 +2949,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2252,6 +2957,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2282,6 +2988,7 @@
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -2289,6 +2996,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -2296,6 +3004,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -2303,6 +3012,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -2310,14 +3020,17 @@
             "default": null
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial. High-frequency symbols can return large lists, so keep this bounded.",
             "type": "integer",
-            "default": 1000
+            "default": 300
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2325,6 +3038,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2332,6 +3046,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2357,14 +3072,16 @@
     {
       "name": "find_csharp_references_by_symbol_search",
       "title": null,
-      "description": "Find references by first searching symbols and then using the unique matched symbol key. Returns candidate diagnostics when the search is ambiguous.",
+      "description": "Find references by first searching symbols and then using the unique matched symbol key. Use this when you only have a symbol NAME; once any tool returned a symbolKey, call find_csharp_references with that key instead. Returns candidate diagnostics when the search is ambiguous.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "queryText": {
+            "description": "Case-insensitive substring of the symbol name to resolve first.",
             "type": "string"
           },
           "containingType": {
+            "description": "Optional containing type name to disambiguate the symbol search.",
             "type": [
               "string",
               "null"
@@ -2372,6 +3089,7 @@
             "default": null
           },
           "projectName": {
+            "description": "Optional project name to disambiguate the symbol search.",
             "type": [
               "string",
               "null"
@@ -2379,6 +3097,7 @@
             "default": null
           },
           "kind": {
+            "description": "Optional symbol kind filter: Namespace, Type, Method, Property, Field, Event, Parameter, or Local.",
             "type": [
               "string",
               "null"
@@ -2398,18 +3117,22 @@
             "default": null
           },
           "maxSymbolCandidates": {
+            "description": "Maximum symbol candidates to consider before failing as ambiguous.",
             "type": "integer",
             "default": 50
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
-            "default": 1000
+            "default": 300
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2417,6 +3140,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2424,6 +3148,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2452,11 +3177,12 @@
     {
       "name": "find_csharp_related_tests",
       "title": null,
-      "description": "Find C# tests that directly reference or heuristically match a production symbol or source file.",
+      "description": "Find C# tests that directly reference or heuristically match a production symbol or source file. Strong evidence comes from Roslyn references; naming and namespace matches are returned as heuristic reasons only.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -2464,6 +3190,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -2471,6 +3198,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -2478,6 +3206,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -2485,14 +3214,17 @@
             "default": null
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
             "default": 100
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2500,6 +3232,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2507,6 +3240,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2586,11 +3320,12 @@
     {
       "name": "find_csharp_temporary_markers",
       "title": null,
-      "description": "Scan C# syntax trivia for temporary or simplified implementation markers such as TODO, FIXME, HACK, TEMP, WORKAROUND, \u4E34\u65F6, and \u7B80\u5316.",
+      "description": "Scan C# syntax trivia for temporary or simplified implementation markers such as TODO, FIXME, HACK, TEMP, WORKAROUND, \u4E34\u65F6, and \u7B80\u5316. Review helper only; empty results prove nothing.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "filePath": {
+            "description": "Optional absolute file path to scope the scan to one document.",
             "type": [
               "string",
               "null"
@@ -2598,6 +3333,7 @@
             "default": null
           },
           "projectName": {
+            "description": "Optional project name to scope the scan.",
             "type": [
               "string",
               "null"
@@ -2605,14 +3341,17 @@
             "default": null
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
             "default": 500
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2620,6 +3359,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2627,6 +3367,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2690,6 +3431,35 @@
             "default": 80
           }
         }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": true,
+        "openWorldHint": null,
+        "readOnlyHint": true
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "get_csharp_debug_scenario_execution",
+      "title": null,
+      "description": "Read the bounded local result of a C# debug scenario execution by execution id; missing records are explicitly reported as unknown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "executionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "executionId"
+        ]
       },
       "outputSchema": null,
       "annotations": {
@@ -2796,6 +3566,16 @@
             ],
             "default": "Auto"
           },
+          "collectionMode": {
+            "description": "Diagnostic coverage: Auto uses Fast for unscoped work and Complete for a focused scope; Fast favors latency and may stop early; Complete attempts all matching projects within the time budget.",
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
+            ],
+            "default": "Auto"
+          },
           "maxResults": {
             "description": "Maximum number of diagnostics to return.",
             "type": "integer",
@@ -2864,19 +3644,24 @@
         "type": "object",
         "properties": {
           "filePath": {
+            "description": "Absolute path of the source file.",
             "type": "string"
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": "integer"
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": "integer"
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -2884,6 +3669,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -2891,6 +3677,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -2926,6 +3713,7 @@
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -2933,6 +3721,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -2940,6 +3729,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -2947,6 +3737,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -2954,6 +3745,209 @@
             "default": null
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
+            "type": "boolean",
+            "default": false
+          },
+          "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": true,
+        "openWorldHint": null,
+        "readOnlyHint": true
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "get_csharp_live_diagnostics",
+      "title": null,
+      "description": "Return the C# diagnostics Visual Studio has ALREADY computed through its live background analysis (compiler \u002B analyzers) - near-instant on warm solutions and never triggers a fresh analyzer pass. Completeness is best-effort while background analysis is pending (right after opening a solution or after edits); for guaranteed complete synchronous analysis use get_csharp_diagnostics instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "description": "Optional absolute file path to scope to one document.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "projectName": {
+            "description": "Optional project name to scope the live diagnostics.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "includePathPatterns": {
+            "description": "Optional file, directory, or wildcard patterns to include.",
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "excludePathPatterns": {
+            "description": "Optional file, directory, or wildcard patterns to exclude.",
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "changedFiles": {
+            "description": "Optional changed files from git diff; used only for relevance scoring.",
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default": null
+          },
+          "minimumSeverity": {
+            "description": "Optional minimum severity filter: Hidden, Info, Warning, or Error.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "Hidden",
+              "Info",
+              "Warning",
+              "Error",
+              null
+            ],
+            "default": null
+          },
+          "maxResults": {
+            "description": "Maximum diagnostics to return.",
+            "type": "integer",
+            "default": 200
+          },
+          "includeGeneratedCode": {
+            "description": "Include generated documents such as .Designer.cs and source-generated files.",
+            "type": "boolean",
+            "default": false
+          },
+          "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": true,
+        "openWorldHint": null,
+        "readOnlyHint": true
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "get_csharp_operation_status",
+      "title": null,
+      "description": "\u67E5\u8BE2\u6307\u5B9A VS \u5B9E\u4F8B\u5185\u6700\u8FD1\u4FEE\u6539\u3001\u5BFC\u822A\u6216\u8C03\u8BD5\u64CD\u4F5C\u7684\u72B6\u6001\u53CA\u4FDD\u7559\u54CD\u5E94\u3002\u7528\u4E8E\u53D6\u6D88\u3001\u8D85\u65F6\u3001\u65AD\u7EBF\u540E\u7684\u7ED3\u679C\u786E\u8BA4\uFF0C\u4E0D\u91CD\u65B0\u6267\u884C\u64CD\u4F5C\uFF1B\u672A\u627E\u5230\u4E0D\u4EE3\u8868\u672A\u6267\u884C\u3002",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "description": "\u64CD\u4F5C\u56DE\u6267\u4E2D\u7684\u8BF7\u6C42\u6807\u8BC6\u3002\u8C03\u7528\u88AB\u5BBF\u4E3B\u53D6\u6D88\u3001\u672A\u6536\u5230\u6807\u8BC6\u65F6\u53EF\u7701\u7565\uFF0C\u5217\u51FA\u6700\u8FD1\u8BB0\u5F55\u540E\u4EBA\u5DE5\u6838\u5BF9\u3002",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "method": {
+            "description": "\u53EF\u9009\u6865\u63A5\u65B9\u6CD5\u8FC7\u6EE4\uFF0C\u4F8B\u5982 ApplyCodeFix \u6216 StartDebugging\u3002",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "maxResults": {
+            "type": "integer",
+            "default": 10
+          },
+          "includeResponse": {
+            "description": "\u8FD4\u56DE\u539F\u59CB\u54CD\u5E94\uFF0C\u53EA\u5141\u8BB8\u5728\u6307\u5B9A requestId \u65F6\u542F\u7528\u3002Completed \u4EC5\u8868\u793A\u5DF2\u8FD4\u56DE\u54CD\u5E94\uFF0C\u5E94\u68C0\u67E5\u5176\u4E2D\u7684\u5B9E\u9645\u6267\u884C\u7ED3\u679C\u3002",
             "type": "boolean",
             "default": false
           },
@@ -3002,6 +3996,7 @@
         "type": "object",
         "properties": {
           "projectName": {
+            "description": "Optional project name or path fragment to scope the graph to one project (its outgoing edges are preserved).",
             "type": [
               "string",
               "null"
@@ -3009,18 +4004,22 @@
             "default": null
           },
           "maxProjects": {
+            "description": "Maximum projects to return.",
             "type": "integer",
             "default": 500
           },
           "maxMetadataReferencesPerProject": {
+            "description": "Maximum metadata references per project; 0 omits metadata references entirely.",
             "type": "integer",
             "default": 50
           },
           "includeMetadataReferences": {
+            "description": "Whether to include metadata (assembly) references in each node.",
             "type": "boolean",
             "default": true
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -3028,6 +4027,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -3035,6 +4035,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -3060,32 +4061,39 @@
     {
       "name": "get_csharp_source_context",
       "title": null,
-      "description": "Return the enclosing C# member or type source around a file position, with compact context and truncation metadata.",
+      "description": "Return the enclosing C# member or type source around a file position, with compact context and truncation metadata. Use it for build errors, diagnostics, and debugger frames instead of reading whole files.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "filePath": {
+            "description": "Absolute path of the source file.",
             "type": "string"
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": "integer"
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": "integer"
           },
           "contextLines": {
+            "description": "Lines of context to include around the enclosing member.",
             "type": "integer",
             "default": 3
           },
           "maxChars": {
+            "description": "Maximum total characters of returned snippet text.",
             "type": "integer",
             "default": 12000
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -3093,6 +4101,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -3100,6 +4109,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -3130,11 +4140,12 @@
     {
       "name": "get_csharp_symbol_source",
       "title": null,
-      "description": "Return compact source snippets for a C# symbol declaration, including optional surrounding context and truncation metadata.",
+      "description": "Return compact source snippets for a C# symbol declaration, including optional surrounding context and truncation metadata. Prefer this over reading whole files before editing a known symbol.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "symbolKey": {
+            "description": "Symbol key returned by search_csharp_symbols or another navigation tool. Preferred input; omit it to use a source position instead.",
             "type": [
               "string",
               "null"
@@ -3142,6 +4153,7 @@
             "default": null
           },
           "filePath": {
+            "description": "Absolute path of a source file, combined with line and column when no symbol key is available.",
             "type": [
               "string",
               "null"
@@ -3149,6 +4161,7 @@
             "default": null
           },
           "line": {
+            "description": "1-based line number of the source position.",
             "type": [
               "integer",
               "null"
@@ -3156,6 +4169,7 @@
             "default": null
           },
           "column": {
+            "description": "1-based column (character offset) of the source position.",
             "type": [
               "integer",
               "null"
@@ -3163,22 +4177,27 @@
             "default": null
           },
           "contextLines": {
+            "description": "Lines of context to include around the declaration.",
             "type": "integer",
             "default": 3
           },
           "maxChars": {
+            "description": "Maximum total characters of returned snippet text.",
             "type": "integer",
             "default": 12000
           },
           "maxSnippets": {
+            "description": "Maximum snippets to return for overloaded or partial symbols.",
             "type": "integer",
             "default": 3
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -3186,6 +4205,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -3193,6 +4213,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -3218,7 +4239,7 @@
     {
       "name": "get_csharp_task_context",
       "title": null,
-      "description": "Create a compact task context package for C# work by combining investigation evidence with bounded source snippets for likely edit locations.",
+      "description": "Create a compact task context package for C# work by combining investigation evidence with bounded source snippets for likely edit locations. Lower-level fallback with custom symbol/file/project scope; prefer prepare_csharp_edit_task when the packet entry is available.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3327,6 +4348,15 @@
             ],
             "default": "Auto"
           },
+          "collectionMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
+            ],
+            "default": "Auto"
+          },
           "includeWholeSolutionDiagnostics": {
             "type": "boolean",
             "default": false
@@ -3409,9 +4439,38 @@
       "_meta": null
     },
     {
+      "name": "get_csharp_workflow_capabilities",
+      "title": null,
+      "description": "Discover the tools actually registered by this server, grouped by task category, with preferred entry points. Call this first when unsure which tool fits a task. Local assembly reflection only: it does not connect to the VSIX, run Roslyn or performance snapshots, start Visual Studio, or install anything, and it does not prove target bridge support or version safety.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskCategory": {
+            "description": "Optional task category, case-insensitive; null or \u0027all\u0027 returns everything. Supported: discovery, workspace, edit, review, verification, build, diagnostics, navigation, debug, mutation, operation-status, artifacts, performance, repository, collaboration, other.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "execution": null,
+      "icons": null,
+      "_meta": null
+    },
+    {
       "name": "get_csharp_workflow_performance_snapshot",
       "title": null,
-      "description": "Return a compact performance and workflow harness snapshot with active/stale bridge counts, tool count expectations, and suggested benchmark commands.",
+      "description": "Return a compact performance, capability, and workflow harness snapshot with active/stale bridge counts, supported task routes, tool count expectations, and suggested benchmark commands.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3430,8 +4489,9 @@
             "default": null
           },
           "expectedToolCount": {
+            "description": "\u5DE5\u5177\u6570\u91CF\u5BA1\u8BA1\u671F\u671B\u503C\uFF0C0 \u8868\u793A\u4F7F\u7528\u5B9E\u9645\u6CE8\u518C\u6570\u91CF\uFF1B\u4E0D\u5F71\u54CD\u5B9E\u9645\u89C2\u6D4B\u6570\u91CF\u3002",
             "type": "integer",
-            "default": 83
+            "default": 0
           },
           "targetPipeName": {
             "type": [
@@ -3747,6 +4807,113 @@
       "_meta": null
     },
     {
+      "name": "get_visual_studio_activity",
+      "title": null,
+      "description": "Read recent in-Visual-Studio activity events (builds started/finished, debugger mode transitions, solution open/close, documents opened/saved) from a bounded ring buffer subscribed to EnvDTE events. Use this to learn what the HUMAN did in Visual Studio since you last looked, even when you were not the one driving.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxEvents": {
+            "description": "Maximum events to return (1-200, newest first).",
+            "type": "integer",
+            "default": 50
+          },
+          "category": {
+            "description": "Optional category filter: build, debug, solution, document, or system.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetPipeName": {
+            "description": "Target Visual Studio bridge pipe name.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "Target Visual Studio bridge instance id.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "Target Visual Studio solution path.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": true,
+        "openWorldHint": null,
+        "readOnlyHint": true
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "get_visual_studio_build_status",
+      "title": null,
+      "description": "Read the current Visual Studio solution build state: InProgress / Done / NotStarted, startup projects, and active configuration. Pair with get_visual_studio_error_list for actual error details after a build.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetPipeName": {
+            "description": "Target Visual Studio bridge pipe name.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "Target Visual Studio bridge instance id.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "Target Visual Studio solution path.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": true,
+        "openWorldHint": null,
+        "readOnlyHint": true
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
       "name": "get_visual_studio_error_list",
       "title": null,
       "description": "Return the current Visual Studio Error List items through EnvDTE. This is VS UI context, not a replacement for build output or Roslyn diagnostics.",
@@ -3915,7 +5082,7 @@
     {
       "name": "investigate_csharp_build_failure",
       "title": null,
-      "description": "Create a compact build-failure context by combining build triage, VS Build pane, Error List, scoped diagnostics, source snippets, and next actions.",
+      "description": "Create a compact build-failure context by combining build triage, VS Build pane, Error List, scoped diagnostics, source snippets, and next actions. Prefer this over start_csharp_investigation whenever a build failure has output, a log file, or an open VS Build pane.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -4014,6 +5181,15 @@
               "Filter",
               "Off",
               "Auto"
+            ],
+            "default": "Auto"
+          },
+          "collectionMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
             ],
             "default": "Auto"
           },
@@ -4393,17 +5569,21 @@
         "type": "object",
         "properties": {
           "filePath": {
+            "description": "Absolute path of the document.",
             "type": "string"
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
             "default": 1000
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -4411,6 +5591,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -4418,6 +5599,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -4451,6 +5633,7 @@
         "type": "object",
         "properties": {
           "projectName": {
+            "description": "Optional project name to scope the listing.",
             "type": [
               "string",
               "null"
@@ -4458,14 +5641,17 @@
             "default": null
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
             "default": 1000
           },
           "includeSourceGeneratedDocuments": {
+            "description": "Whether to include Roslyn source-generated in-memory documents.",
             "type": "boolean",
             "default": true
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -4473,6 +5659,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -4480,6 +5667,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -5028,7 +6216,7 @@
     {
       "name": "plan_csharp_regression_scope",
       "title": null,
-      "description": "Create a regression-scope plan by combining verification planning and semantic change review into smoke, focused, and broad command tiers.",
+      "description": "Create a regression-scope plan by combining verification planning and semantic change review into smoke, focused, and broad command tiers. Use when you want review and verification combined in one pass; prefer prepare_csharp_verification_run for pure command selection.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5150,6 +6338,15 @@
             ],
             "default": "Auto"
           },
+          "collectionMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
+            ],
+            "default": "Auto"
+          },
           "includeVisualStudioBuildOutput": {
             "type": "boolean",
             "default": true
@@ -5218,7 +6415,7 @@
     {
       "name": "plan_csharp_verification",
       "title": null,
-      "description": "Create a read-only verification plan for changed C# files by combining build triage, scoped diagnostics, affected projects, related tests, and dotnet command suggestions.",
+      "description": "Create a read-only verification plan for changed C# files by combining build triage, scoped diagnostics, affected projects, related tests, and dotnet command suggestions. Legacy planner; prefer prepare_csharp_verification_run when the newer packet entry is available.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5320,6 +6517,15 @@
             ],
             "default": "Auto"
           },
+          "collectionMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
+            ],
+            "default": "Auto"
+          },
           "includeWholeSolutionDiagnostics": {
             "type": "boolean",
             "default": false
@@ -5388,7 +6594,7 @@
     {
       "name": "prepare_csharp_change_review",
       "title": null,
-      "description": "Prepare a read-only Agentic C# change review packet with risks, test gaps, candidate edit locations, evidence resources, and safety blockers.",
+      "description": "Prepare a read-only Agentic C# change review packet with risks, test gaps, candidate edit locations, evidence resources, and safety blockers. Prefer this over review_csharp_change when reviewing local changes; review_csharp_change is the legacy fixed-size bundle for older servers.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5605,7 +6811,7 @@
     {
       "name": "prepare_csharp_edit_task",
       "title": null,
-      "description": "Prepare a read-only Agentic C# edit task packet with evidence, candidate edit locations, bounded source context, next actions, and safety blockers.",
+      "description": "Prepare a read-only Agentic C# edit task packet with evidence, candidate edit locations, bounded source context, next actions, and safety blockers. Prefer this over get_csharp_task_context and start_csharp_investigation for feature work, bug fixes, and any task likely to edit C# files; it is the V2 entry with evidence resources and detail levels.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -5841,7 +7047,7 @@
     {
       "name": "prepare_csharp_verification_run",
       "title": null,
-      "description": "Prepare a read-only Agentic C# verification run packet with smoke, focused, and broad build/test command tiers plus evidence resources and safety blockers.",
+      "description": "Prepare a read-only Agentic C# verification run packet with smoke, focused, and broad build/test command tiers plus evidence resources and safety blockers. Prefer this over plan_csharp_verification and plan_csharp_regression_scope when choosing what to build or test after edits; execute the selected shell commands explicitly afterwards.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -6780,41 +7986,57 @@
       "_meta": null
     },
     {
-      "name": "remove_debug_breakpoint",
+      "name": "preview_csharp_text_edits",
       "title": null,
-      "description": "Remove exactly one breakpoint by breakpoint name or absolute file path and line in the targeted Visual Studio instance. Requires an explicit target.",
+      "description": "Preview plain text edits for one C# document through the Visual Studio workspace: returns old/new snippets, text-change diffs, fingerprint, and safety blockers WITHOUT applying anything. Use this instead of editing files on disk when Visual Studio has the document open, so buffers never desync; then call apply_csharp_text_edits after user approval.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "breakpointName": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "default": null
-          },
           "filePath": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "default": null
+            "description": "Absolute path of the target document in the active solution.",
+            "type": "string"
           },
-          "line": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "default": null
+          "edits": {
+            "description": "Edits as 1-based line/column ranges with an EXCLUSIVE end position; columns are character offsets (1 = first character, line length \u002B 1 = end of line). Edits must not overlap.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "startLine": {
+                  "type": "integer"
+                },
+                "startColumn": {
+                  "type": "integer"
+                },
+                "endLine": {
+                  "type": "integer"
+                },
+                "endColumn": {
+                  "type": "integer"
+                },
+                "newText": {
+                  "type": "string"
+                }
+              }
+            }
           },
-          "column": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "default": null
+          "maxTextChanges": {
+            "description": "Maximum text changes included in the preview before it is marked truncated.",
+            "type": "integer",
+            "default": 200
+          },
+          "maxSnippetLength": {
+            "description": "Maximum characters per old/new snippet in the preview.",
+            "type": "integer",
+            "default": 200
+          },
+          "includeGeneratedCode": {
+            "description": "Allow targeting generated documents such as .Designer.cs and source-generated files.",
+            "type": "boolean",
+            "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -6822,6 +8044,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -6829,15 +8052,95 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "filePath",
+          "edits"
+        ]
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": true,
+        "openWorldHint": null,
+        "readOnlyHint": true
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "remove_debug_breakpoint",
+      "title": null,
+      "description": "Remove a breakpoint by name or file/line in the targeted Visual Studio instance. This mutates debugger state and requires an explicit target.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "breakpointName": {
+            "description": "Breakpoint name from list_debug_breakpoints, if known.",
             "type": [
               "string",
               "null"
             ],
             "default": null
           },
-          "timeoutMilliseconds": {
-            "type": "integer",
-            "default": 10000
+          "filePath": {
+            "description": "Absolute path of the source file (alternative to breakpointName).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "line": {
+            "description": "One-based line number (used with filePath).",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          },
+          "column": {
+            "description": "One-based column; 0 matches any breakpoint on the line.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          },
+          "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           }
         }
       },
@@ -6858,7 +8161,7 @@
     {
       "name": "review_csharp_change",
       "title": null,
-      "description": "Create a read-only semantic review package for changed C# files or a focused symbol, including impact, risks, test gaps, temporary markers, and verification next actions.",
+      "description": "Create a read-only semantic review package for changed C# files or a focused symbol, including impact, risks, test gaps, temporary markers, and verification next actions. Legacy review bundle; prefer prepare_csharp_change_review when the newer packet entry is available.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -6973,6 +8276,15 @@
             ],
             "default": "Auto"
           },
+          "collectionMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
+            ],
+            "default": "Auto"
+          },
           "maxBuildIssues": {
             "type": "integer",
             "default": 20
@@ -7037,22 +8349,26 @@
     {
       "name": "search_csharp_symbols",
       "title": null,
-      "description": "Search C# symbols in the active Visual Studio solution and return file and line evidence.",
+      "description": "Search C# symbols in the active Visual Studio solution and return file and line evidence. The first choice for turning a symbol NAME into a symbolKey for the other navigation tools.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "queryText": {
+            "description": "Case-insensitive substring of the symbol name, optionally containing type or namespace parts.",
             "type": "string"
           },
           "maxResults": {
+            "description": "Maximum items to return. Truncation is reported through diagnostics and isPartial.",
             "type": "integer",
             "default": 50
           },
           "includeGeneratedCode": {
+            "description": "Also include generated documents such as .Designer.cs and source-generated files.",
             "type": "boolean",
             "default": false
           },
           "targetPipeName": {
+            "description": "Optional target Visual Studio bridge pipe name. Highest priority when provided.",
             "type": [
               "string",
               "null"
@@ -7060,6 +8376,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "Optional target Visual Studio bridge instance id. Preferred for repeated calls in one session.",
             "type": [
               "string",
               "null"
@@ -7067,6 +8384,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "Optional target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -7095,41 +8413,38 @@
     {
       "name": "set_debug_breakpoint",
       "title": null,
-      "description": "Set a source breakpoint by absolute file path and line in the targeted Visual Studio instance. Requires an explicit target.",
+      "description": "Set a source breakpoint at a file/line in the targeted Visual Studio instance. This mutates debugger state and requires an explicit target.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "filePath": {
+            "description": "Absolute path of the source file containing the breakpoint.",
             "type": "string"
           },
           "line": {
+            "description": "One-based line number for the breakpoint.",
             "type": "integer"
           },
           "column": {
+            "description": "One-based column; defaults to 1 when omitted.",
             "type": "integer",
             "default": 1
           },
           "condition": {
+            "description": "Optional condition expression; the breakpoint only hits when true.",
             "type": [
               "string",
               "null"
             ],
             "default": null
           },
-          "conditionMode": {
-            "type": "string",
-            "enum": [
-              "None",
-              "WhenTrue",
-              "WhenChanged"
-            ],
-            "default": "WhenTrue"
-          },
           "hitCountTarget": {
+            "description": "Hit count target; use with hitCountMode other than None.",
             "type": "integer",
             "default": 0
           },
           "hitCountMode": {
+            "description": "Hit count mode: None, Equal, GreaterOrEqual, or Multiple.",
             "type": "string",
             "enum": [
               "None",
@@ -7140,6 +8455,7 @@
             "default": "None"
           },
           "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
             "type": [
               "string",
               "null"
@@ -7147,6 +8463,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
             "type": [
               "string",
               "null"
@@ -7154,15 +8471,12 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
             ],
             "default": null
-          },
-          "timeoutMilliseconds": {
-            "type": "integer",
-            "default": 10000
           }
         },
         "required": [
@@ -7276,7 +8590,7 @@
     {
       "name": "start_csharp_investigation",
       "title": null,
-      "description": "Start a read-only C# investigation by combining bridge health, optional build-log triage, scoped diagnostics, symbol lookup, and related context.",
+      "description": "Start a read-only C# investigation by combining bridge health, optional build-log triage, scoped diagnostics, symbol lookup, and related context. Prefer prepare_csharp_edit_task for edit-oriented tasks and investigate_csharp_build_failure when build output or an open VS Build pane exists; use this for broad open-ended investigation or on older servers without the packet entries.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -7385,6 +8699,15 @@
             ],
             "default": "Auto"
           },
+          "collectionMode": {
+            "type": "string",
+            "enum": [
+              "Auto",
+              "Fast",
+              "Complete"
+            ],
+            "default": "Auto"
+          },
           "includeWholeSolutionDiagnostics": {
             "type": "boolean",
             "default": false
@@ -7457,11 +8780,12 @@
     {
       "name": "start_debugging",
       "title": null,
-      "description": "Start debugging in the targeted Visual Studio instance. This mutates debugger state and requires an explicit target.",
+      "description": "Start debugging in the targeted Visual Studio instance using its startup project and active configuration. This mutates debugger state and requires an explicit target.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
             "type": [
               "string",
               "null"
@@ -7469,6 +8793,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
             "type": [
               "string",
               "null"
@@ -7476,6 +8801,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -7483,8 +8809,69 @@
             "default": null
           },
           "timeoutMilliseconds": {
+            "description": "How long to wait for the debugger action to complete, in milliseconds (1000-60000).",
             "type": "integer",
             "default": 10000
+          }
+        }
+      },
+      "outputSchema": null,
+      "annotations": {
+        "title": null,
+        "destructiveHint": null,
+        "idempotentHint": false,
+        "openWorldHint": null,
+        "readOnlyHint": false
+      },
+      "execution": {
+        "taskSupport": "optional"
+      },
+      "icons": null,
+      "_meta": null
+    },
+    {
+      "name": "start_visual_studio_build",
+      "title": null,
+      "description": "Start a Visual Studio build (fire-and-forget) through the VS solution build system, using the user\u0027s active configuration and startup projects. Mutates Visual Studio state; requires an explicit target. Poll get_visual_studio_build_status for completion, then get_visual_studio_error_list for errors. Complements execute_csharp_verification (which runs dotnet in a shell).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectName": {
+            "description": "Optional project name to build one project; omit for the full solution build.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "rebuild": {
+            "description": "true cleans before building (rebuild semantics).",
+            "type": "boolean",
+            "default": false
+          },
+          "targetPipeName": {
+            "description": "Target Visual Studio bridge pipe name.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetInstanceId": {
+            "description": "Target Visual Studio bridge instance id.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "targetSolutionPath": {
+            "description": "Target Visual Studio solution path.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           }
         }
       },
@@ -7510,6 +8897,7 @@
         "type": "object",
         "properties": {
           "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
             "type": [
               "string",
               "null"
@@ -7517,6 +8905,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
             "type": [
               "string",
               "null"
@@ -7524,6 +8913,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -7531,6 +8921,7 @@
             "default": null
           },
           "timeoutMilliseconds": {
+            "description": "How long to wait for the debugger action to complete, in milliseconds (1000-60000).",
             "type": "integer",
             "default": 10000
           }
@@ -7553,11 +8944,12 @@
     {
       "name": "step_out",
       "title": null,
-      "description": "Step out from the current debugger frame in the targeted Visual Studio instance. Requires break mode and an explicit target.",
+      "description": "Step out of the current debugger frame in the targeted Visual Studio instance. Requires break mode and an explicit target.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
             "type": [
               "string",
               "null"
@@ -7565,6 +8957,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
             "type": [
               "string",
               "null"
@@ -7572,6 +8965,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -7579,6 +8973,7 @@
             "default": null
           },
           "timeoutMilliseconds": {
+            "description": "How long to wait for the debugger action to complete, in milliseconds (1000-60000).",
             "type": "integer",
             "default": 10000
           }
@@ -7606,6 +9001,7 @@
         "type": "object",
         "properties": {
           "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
             "type": [
               "string",
               "null"
@@ -7613,6 +9009,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
             "type": [
               "string",
               "null"
@@ -7620,6 +9017,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -7627,6 +9025,7 @@
             "default": null
           },
           "timeoutMilliseconds": {
+            "description": "How long to wait for the debugger action to complete, in milliseconds (1000-60000).",
             "type": "integer",
             "default": 10000
           }
@@ -7654,6 +9053,7 @@
         "type": "object",
         "properties": {
           "targetPipeName": {
+            "description": "REQUIRED: target Visual Studio bridge pipe name. Debug control refuses to run without an explicit target.",
             "type": [
               "string",
               "null"
@@ -7661,6 +9061,7 @@
             "default": null
           },
           "targetInstanceId": {
+            "description": "REQUIRED (if no pipe name): target Visual Studio bridge instance id from list_visual_studio_instances.",
             "type": [
               "string",
               "null"
@@ -7668,6 +9069,7 @@
             "default": null
           },
           "targetSolutionPath": {
+            "description": "REQUIRED (if no pipe/instance id): target Visual Studio solution path. Fails with candidates when ambiguous.",
             "type": [
               "string",
               "null"
@@ -7675,6 +9077,7 @@
             "default": null
           },
           "timeoutMilliseconds": {
+            "description": "How long to wait for the debugger action to complete, in milliseconds (1000-60000).",
             "type": "integer",
             "default": 10000
           }

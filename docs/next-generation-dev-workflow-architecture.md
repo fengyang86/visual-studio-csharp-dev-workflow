@@ -140,7 +140,7 @@ flowchart LR
 - `get_visual_studio_active_document_context`
 - `open_csharp_source_location`
 
-2026-06-26 源码落地状态：以上建议工具已在仓库源码中实现；后续 rename apply、cleanup、provider-backed Code Fix / Fix All preview/apply、复杂重构计划、Build Failure Context、Artifact Evidence / wait、Regression Scope、Debug Session Preparation、Debug Scenario、Performance Snapshot、Agentic 任务级入口、Agent 指令和多 Agent 工作包也已落地源码侧。Release server `tool-schema` 当前预期为 82 个 MCP tools，`resources/templates/list` 返回 15 个模板。当前不得自动更新 personal plugin runtime、VSIX、MCP 或 packaged skill，除非用户明确确认。
+2026-09-16 源码落地状态：以上建议工具已在仓库源码中实现；新增诊断覆盖分级、工作流截止守卫/阶段遥测、证据去重与有界过期索引、显式调试场景执行/结果查询，以及结构化构建/测试执行。Release server `tool-schema` 当前返回 90 个 MCP tools，`resources/templates/list` 返回 15 个模板。当前不得自动更新 personal plugin runtime、VSIX、MCP 或 packaged skill，除非用户明确确认。
 
 关键 DTO：
 

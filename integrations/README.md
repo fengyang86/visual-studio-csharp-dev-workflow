@@ -23,6 +23,7 @@ provider settings and avoids accidentally overwriting other MCP servers.
 | Host | Status | Integration surface |
 | --- | --- | --- |
 | Codex | Supported | Packaged personal plugin, skill, and MCP configuration |
+| ZCode | 本机验证通过 | 用户级 MCP 配置与共享技能；尚未纳入通用分发安装器，见 [接入说明](zcode/README.md) |
 | DeepSeekHarness | Supported | Cordis patch integration (`cordis.patch.yml`), generated fragments, and the packaged `Install-DshMcpServer.ps1` installer |
 | Claude Code | Configuration ready | Standard project or user MCP JSON configuration; E3 smoke pending |
 

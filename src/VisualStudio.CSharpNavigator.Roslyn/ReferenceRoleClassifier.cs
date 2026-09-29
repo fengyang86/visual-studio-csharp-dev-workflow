@@ -17,27 +17,31 @@ public static class ReferenceRoleClassifier
 
         var node = syntaxRoot.FindNode(sourceSpan, getInnermostNodeForTie: true);
         if (node.FirstAncestorOrSelf<AssignmentExpressionSyntax>() is { } assignment
-            && assignment.Left.Span.Contains(sourceSpan))
+            && IsDirectWriteTarget(assignment.Left, sourceSpan))
         {
             return ReferenceRole.Write;
         }
 
         if (node.FirstAncestorOrSelf<PrefixUnaryExpressionSyntax>() is { } prefixUnary
             && (prefixUnary.IsKind(SyntaxKind.PreIncrementExpression)
-                || prefixUnary.IsKind(SyntaxKind.PreDecrementExpression)))
+                || prefixUnary.IsKind(SyntaxKind.PreDecrementExpression))
+            && IsDirectWriteTarget(prefixUnary.Operand, sourceSpan))
         {
             return ReferenceRole.Write;
         }
 
-        if (node.FirstAncestorOrSelf<PostfixUnaryExpressionSyntax>() is not null)
+        if (node.FirstAncestorOrSelf<PostfixUnaryExpressionSyntax>() is { } postfixUnary
+            && (postfixUnary.IsKind(SyntaxKind.PostIncrementExpression)
+                || postfixUnary.IsKind(SyntaxKind.PostDecrementExpression))
+            && IsDirectWriteTarget(postfixUnary.Operand, sourceSpan))
         {
             return ReferenceRole.Write;
         }
 
         if (node.FirstAncestorOrSelf<ArgumentSyntax>() is { } argument
-            && argument.Expression.Span.Contains(sourceSpan)
             && (argument.RefOrOutKeyword.IsKind(SyntaxKind.OutKeyword)
-                || argument.RefOrOutKeyword.IsKind(SyntaxKind.RefKeyword)))
+                || argument.RefOrOutKeyword.IsKind(SyntaxKind.RefKeyword))
+            && IsDirectWriteTarget(argument.Expression, sourceSpan))
         {
             return ReferenceRole.Write;
         }
@@ -55,6 +59,24 @@ public static class ReferenceRoleClassifier
         }
 
         return ReferenceRole.Read;
+    }
+
+    // A reference is a write only when it IS the write target itself. For member
+    // access chains (x.Prop = v) only the rightmost name is written; receivers
+    // (x) and index expressions (arr[i] = v) are reads of their operands.
+    private static bool IsDirectWriteTarget(ExpressionSyntax expression, TextSpan sourceSpan)
+    {
+        switch (expression)
+        {
+            case MemberAccessExpressionSyntax memberAccess:
+                return memberAccess.Name.Span.Contains(sourceSpan);
+            case MemberBindingExpressionSyntax memberBinding:
+                return memberBinding.Name.Span.Contains(sourceSpan);
+            case ElementAccessExpressionSyntax:
+                return false;
+            default:
+                return expression.Span.Contains(sourceSpan);
+        }
     }
 
     private static bool IsInvocationTarget(ExpressionSyntax expression, TextSpan sourceSpan)

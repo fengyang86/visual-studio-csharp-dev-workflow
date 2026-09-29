@@ -6,7 +6,7 @@
 
 ## 基线
 
-- 当前对外工具数：82。旧工具保持兼容；Agentic 任务级入口、artifact wait、debug scenario plan、性能预算快照和多 Agent 工作包工具已纳入 schema 快照。
+- 当前对外工具数：90。旧工具保持兼容；Agentic 任务级入口、artifact wait、debug scenario plan、调试场景执行/结果查询、结构化构建/测试执行、性能预算快照和多 Agent 工作包工具已纳入 schema 快照。
 - 当前产品入口：`visual-studio-csharp-dev-workflow@personal`。
 - 当前 MCP server id：`visual_studio_csharp_navigator`。
 - 当前策略：旧工具短期保持兼容；新增 Agentic 任务级入口作为 opt-in，验收后再更新 skill 默认路由。
@@ -63,7 +63,7 @@ dotnet run --project .\artifacts\mcp-stdio-e2e\McpStdioE2e.csproj -c Release --n
 
 - `dotnet build .\VisualStudio.CSharpNavigatorMcp.sln -c Release -v:minimal --no-restore`：通过，0 warning / 0 error。
 - `dotnet test .\tests\VisualStudio.CSharpNavigator.Server.Tests\VisualStudio.CSharpNavigator.Server.Tests.csproj -c Release --no-build -v:minimal --nologo`：通过，250/250。
-- `CODE_NAVIGATOR_TEST_PROFILE=tool-schema` + Release server exe：通过，`TOOL_SCHEMA total=82`，`RESOURCES templates=15`，并刷新 `docs/agentic-tool-schema.snapshot.json`。
+- `CODE_NAVIGATOR_TEST_PROFILE=tool-schema` + Release server exe：通过，`TOOL_SCHEMA total=90`，`RESOURCES templates=15`，并刷新 `docs/agentic-tool-schema.snapshot.json`。
 - `CODE_NAVIGATOR_TEST_PROFILE=agentic-resources` + Release server exe：通过，context/review/verification/debug-evidence/build-failure/build-log resource 均可列出并读取。
 - `dotnet build .\artifacts\mcp-benchmark\McpBenchmark.csproj -c Release -v:minimal --no-restore`：通过，0 warning / 0 error。
 - 触碰 C# 文件 `BareLF=0`；`git diff --check` 无 whitespace error，仅有既有 LF/CRLF warning。
@@ -74,4 +74,4 @@ dotnet run --project .\artifacts\mcp-stdio-e2e\McpStdioE2e.csproj -c Release --n
 - R4 MCP Resources 首版已实现；context/source/review/verification/debug-evidence/build-failure/build-log/diagnostics/impact/artifact 模板已接入，并补充主要 JSON resource 模板。
 - R6 Build Failure Workflow 已完成 root-cause issue 到项目、enclosing symbol、相关测试的有限绑定，并新增推荐验证命令；更完整的分类和影响图资源仍可继续扩展。
 - R7 CodeAction provider-backed discovery、单项 preview/apply replay、Fix All preview/apply replay 和 `MutationSessionStore` 校验已实现；真实 VS dogfood 已通过，覆盖 `CS0103` 单项 CodeAction preview/apply 和 `CS0219` 项目级 Fix All preview/apply。后续仍可继续扩展更多 provider 样本。
-- Skill 默认路由仍需在下一次打包/更新时同步到最新 82 工具说明；当前源码模板已准备更新。
+- Skill 默认路由仍需在下一次打包/更新时同步到最新 90 工具说明；当前源码模板已准备更新。

@@ -15,7 +15,7 @@ public sealed class WorkflowEnhancementTools
     }
 
     [McpServerTool(Name = "investigate_csharp_build_failure", ReadOnly = true, Idempotent = true)]
-    [Description("Create a compact build-failure context by combining build triage, VS Build pane, Error List, scoped diagnostics, source snippets, and next actions.")]
+    [Description("Create a compact build-failure context by combining build triage, VS Build pane, Error List, scoped diagnostics, source snippets, and next actions. Prefer this over start_csharp_investigation whenever a build failure has output, a log file, or an open VS Build pane.")]
     public Task<WorkspaceQueryResult<CSharpBuildFailureContext>> InvestigateCSharpBuildFailure(
         string? problemText = null,
         string? buildOutput = null,
@@ -27,6 +27,7 @@ public sealed class WorkflowEnhancementTools
         string? projectName = null,
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         bool includeVisualStudioBuildOutput = true,
         int maxVisualStudioBuildOutputCharacters = 20000,
         int maxBuildIssues = 20,
@@ -41,7 +42,7 @@ public sealed class WorkflowEnhancementTools
         string? targetSolutionPath = null,
         CancellationToken cancellationToken = default)
     {
-        return _inner.InvestigateCSharpBuildFailure(problemText, buildOutput, buildLogFilePath, changedFiles, filePath, includePathPatterns, excludePathPatterns, projectName, minimumSeverity, noiseProfile, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxErrorListItems, maxSourceSnippets, contextLines, maxCharsPerSnippet, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
+        return _inner.InvestigateCSharpBuildFailure(problemText, buildOutput, buildLogFilePath, changedFiles, filePath, includePathPatterns, excludePathPatterns, projectName, minimumSeverity, noiseProfile, collectionMode, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxErrorListItems, maxSourceSnippets, contextLines, maxCharsPerSnippet, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
     }
 
     [McpServerTool(Name = "collect_artifact_evidence", ReadOnly = true, Idempotent = true)]
@@ -79,7 +80,7 @@ public sealed class WorkflowEnhancementTools
     }
 
     [McpServerTool(Name = "plan_csharp_regression_scope", ReadOnly = true, Idempotent = true)]
-    [Description("Create a regression-scope plan by combining verification planning and semantic change review into smoke, focused, and broad command tiers.")]
+    [Description("Create a regression-scope plan by combining verification planning and semantic change review into smoke, focused, and broad command tiers. Use when you want review and verification combined in one pass; prefer prepare_csharp_verification_run for pure command selection.")]
     public Task<WorkspaceQueryResult<CSharpRegressionScopePlan>> PlanCSharpRegressionScope(
         string? problemText = null,
         string? buildOutput = null,
@@ -93,6 +94,7 @@ public sealed class WorkflowEnhancementTools
         string? projectName = null,
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         bool includeVisualStudioBuildOutput = true,
         int maxVisualStudioBuildOutputCharacters = 20000,
         int maxBuildIssues = 20,
@@ -105,7 +107,7 @@ public sealed class WorkflowEnhancementTools
         string? targetSolutionPath = null,
         CancellationToken cancellationToken = default)
     {
-        return _inner.PlanCSharpRegressionScope(problemText, buildOutput, buildLogFilePath, changedFiles, areaPaths, symbolQuery, filePath, includePathPatterns, excludePathPatterns, projectName, minimumSeverity, noiseProfile, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxRelatedTests, maxRelatedItems, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
+        return _inner.PlanCSharpRegressionScope(problemText, buildOutput, buildLogFilePath, changedFiles, areaPaths, symbolQuery, filePath, includePathPatterns, excludePathPatterns, projectName, minimumSeverity, noiseProfile, collectionMode, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxRelatedTests, maxRelatedItems, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
     }
 
     [McpServerTool(Name = "prepare_debug_session", ReadOnly = true, Idempotent = true)]
@@ -203,11 +205,12 @@ public sealed class WorkflowEnhancementTools
     }
 
     [McpServerTool(Name = "get_csharp_workflow_performance_snapshot", ReadOnly = true, Idempotent = true)]
-    [Description("Return a compact performance and workflow harness snapshot with active/stale bridge counts, tool count expectations, and suggested benchmark commands.")]
+    [Description("Return a compact performance, capability, and workflow harness snapshot with active/stale bridge counts, supported task routes, tool count expectations, and suggested benchmark commands.")]
     public Task<WorkspaceQueryResult<CSharpWorkflowPerformanceSnapshot>> GetCSharpWorkflowPerformanceSnapshot(
         string? solutionPath = null,
         string? benchmarkProfile = null,
-        int expectedToolCount = 83,
+        [Description("工具数量审计期望值，0 表示使用实际注册数量；不影响实际观测数量。")]
+        int expectedToolCount = 0,
         string? targetPipeName = null,
         string? targetInstanceId = null,
         string? targetSolutionPath = null,

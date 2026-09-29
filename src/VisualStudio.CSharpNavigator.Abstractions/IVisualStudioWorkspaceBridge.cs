@@ -46,6 +46,10 @@ public interface IVisualStudioWorkspaceBridge
         SourceContextRequest request,
         CancellationToken cancellationToken);
 
+    Task<WorkspaceQueryResult<SourceContextSnippet>> GetSourceContextsAsync(
+        BatchSourceContextRequest request,
+        CancellationToken cancellationToken);
+
     Task<WorkspaceQueryResult<DocumentSymbolNode>> ListDocumentSymbolsAsync(
         DocumentSymbolsRequest request,
         CancellationToken cancellationToken);
@@ -212,6 +216,30 @@ public interface IVisualStudioWorkspaceBridge
 
     Task<WorkspaceQueryResult<CSharpCodeFixApplyResult>> ApplyFixAllAsync(
         CSharpCodeFixRequest request,
+        CancellationToken cancellationToken);
+
+    Task<WorkspaceQueryResult<CSharpTextEditPreview>> PreviewTextEditAsync(
+        CSharpTextEditRequest request,
+        CancellationToken cancellationToken);
+
+    Task<WorkspaceQueryResult<CSharpTextEditApplyResult>> ApplyTextEditAsync(
+        CSharpTextEditApplyRequest request,
+        CancellationToken cancellationToken);
+
+    Task<WorkspaceQueryResult<CodeDiagnostic>> GetLiveDiagnosticsAsync(
+        LiveDiagnosticsRequest request,
+        CancellationToken cancellationToken);
+
+    Task<WorkspaceQueryResult<VisualStudioBuildResult>> StartVisualStudioBuildAsync(
+        VisualStudioBuildRequest request,
+        CancellationToken cancellationToken);
+
+    Task<WorkspaceQueryResult<VisualStudioBuildStatus>> GetVisualStudioBuildStatusAsync(
+        VisualStudioBuildStatusRequest request,
+        CancellationToken cancellationToken);
+
+    Task<WorkspaceQueryResult<VisualStudioActivityResult>> GetVisualStudioActivityAsync(
+        VisualStudioActivityRequest request,
         CancellationToken cancellationToken);
 
     Task<WorkspaceQueryResult<CSharpRefactoringPlan>> PreviewRefactoringPlanAsync(

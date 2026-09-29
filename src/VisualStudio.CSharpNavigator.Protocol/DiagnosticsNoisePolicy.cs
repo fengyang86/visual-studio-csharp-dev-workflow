@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -25,7 +26,7 @@ public static class DiagnosticsNoisePolicy
 
     public static bool ShouldFilterKnownNoisePath(DiagnosticsRequest request, string filePath)
     {
-        if (!IsKnownNoisePath(filePath))
+        if (!IsKnownNoisePath(filePath, request.NoisePathPatterns))
         {
             return false;
         }
@@ -37,10 +38,10 @@ public static class DiagnosticsNoisePolicy
     public static bool ShouldMarkKnownNoisePath(DiagnosticsRequest request, string filePath)
     {
         return request.NoiseProfile != CodeDiagnosticNoiseProfile.Off
-            && IsKnownNoisePath(filePath);
+            && IsKnownNoisePath(filePath, request.NoisePathPatterns);
     }
 
-    public static bool IsKnownNoisePath(string filePath)
+    public static bool IsKnownNoisePath(string filePath, IEnumerable<string>? configuredPatterns = null)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -54,8 +55,8 @@ public static class DiagnosticsNoisePolicy
             || ContainsPathSegment(normalized, "generated")
             || ContainsPathSegment(normalized, "vendor")
             || ContainsPathSegment(normalized, "packages")
-            || ContainsPathSegment(normalized, "acadplugins")
-            || ContainsPathSegment(normalized, "tzdata_src")
+            || (configuredPatterns is not null
+                && configuredPatterns.Any(pattern => MatchesPathPattern(normalized, pattern)))
             || fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
             || fileName.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase)
             || fileName.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase)
@@ -79,5 +80,30 @@ public static class DiagnosticsNoisePolicy
     private static string NormalizePathForMatching(string path)
     {
         return path.Trim().Replace('\\', '/');
+    }
+
+    private static bool MatchesPathPattern(string normalizedPath, string pattern)
+    {
+        var normalizedPattern = NormalizePathForMatching(pattern);
+        if (string.IsNullOrWhiteSpace(normalizedPattern))
+        {
+            return false;
+        }
+
+        if (normalizedPattern.Contains('*') || normalizedPattern.Contains('?'))
+        {
+            var escaped = System.Text.RegularExpressions.Regex.Escape(normalizedPattern)
+                .Replace("\\*", ".*")
+                .Replace("\\?", ".");
+            return System.Text.RegularExpressions.Regex.IsMatch(
+                normalizedPath,
+                "(^|.*/)" + escaped + "($|/.*)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        return normalizedPath.Equals(normalizedPattern, StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.StartsWith(normalizedPattern + "/", StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.IndexOf("/" + normalizedPattern + "/", StringComparison.OrdinalIgnoreCase) >= 0
+            || normalizedPath.EndsWith("/" + normalizedPattern, StringComparison.OrdinalIgnoreCase);
     }
 }

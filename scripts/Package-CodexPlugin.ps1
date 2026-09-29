@@ -175,7 +175,7 @@ function Write-DefaultSkill {
     $content = @'
 ---
 name: visual-studio-csharp-dev-workflow
-description: "Use when Codex should use the local visual_studio_csharp_navigator MCP tools for Visual Studio C# development workflows: opening or selecting a Visual Studio C# solution, investigating build failures or diagnostics, using changed files and scoped evidence, navigating symbols/references/call graphs/impact, planning focused verification, reviewing C# changes, inspecting debugger context, or using explicit debugger controls."
+description: "Use the local Visual Studio C# MCP tools to investigate, edit, review, verify, or debug C# code; discover server capabilities first and route tasks through registered entry points."
 ---
 
 # Visual Studio C# Dev Workflow
@@ -183,9 +183,10 @@ description: "Use when Codex should use the local visual_studio_csharp_navigator
 ## Core Rules
 
 - When the user asks to analyze, navigate, review, explain, build, verify, or debug local C# code and the current repository contains a Visual Studio solution file (`.sln` or `.slnx`), prefer this workflow and the `visual_studio_csharp_navigator` MCP tools over plain text search alone.
-- If there is no active Visual Studio bridge, proactively perform the setup flow: locate the solution, launch Visual Studio, wait for discovery, then call MCP tools. Do not first ask the user to manually open Visual Studio.
-- Start with `list_visual_studio_instances` to discover active VSIX bridge instances.
-- For first-use checks, build failures, or suspected VSIX/MCP setup problems, prefer `check_visual_studio_csharp_navigator_health` before running deeper navigation calls.
+- Prefer `get_csharp_workflow_capabilities(taskCategory=...)` with the current task category. Discovery reads only local server tool registration; it must not connect to a bridge, run Roslyn, collect performance snapshots, launch Visual Studio, or install components.
+- Use registered workspace preparation, instance discovery, and health tools only when the selected task needs VS semantic context. Capability discovery, local build-log analysis, and artifact reading must not trigger Visual Studio setup.
+- Before first bridge use or when versions are suspect, check `check_visual_studio_csharp_navigator_health` for an explicit target, without a diagnostics preview by default. A registered server tool does not prove target VSIX support; unverified version safety must not be described as compatibility.
+- Enter solution setup only when a required bridge is not ready, respecting the user's restrictions on launching, installing, closing applications, and verification.
 - If more than one Visual Studio instance is active, pass `targetInstanceId`, `targetPipeName`, or `targetSolutionPath`; do not guess.
 - Prefer `targetInstanceId` for repeated work in one session.
 - Preserve tool diagnostics and `isPartial`; do not convert them to empty success.
@@ -200,16 +201,35 @@ description: "Use when Codex should use the local visual_studio_csharp_navigator
 
 ## Default Workflow
 
-For C# development tasks, use this order unless the user asks for a narrower action:
+1. Call `get_csharp_workflow_capabilities` for the task. Common `taskCategory` values are `edit`, `review`, `verification`, `build`, `diagnostics`, `navigation`, `debug`, `mutation`, and `operation-status`; omit the parameter or use `all` only when the full catalog is needed.
+2. Choose an appropriate preferred route from that category's `EntryPoints`. `AvailableTools` means server registration only; arguments, target selection, and authorization still apply. Unverified VSIX and version states in `Safety` do not imply bridge support for new capabilities.
+3. Prepare an explicit workspace target and check health as needed for bridge-backed entry points. If no suitable entry exists, use the fallback below; do not collect performance snapshots or launch Visual Studio for capability discovery.
+4. Expand only primary evidence resources, source snippets, diagnostics, and next actions. Preserve `IsPartial`, diagnostics, and residual risks. Whole-solution diagnostics are background; changed-file and scoped evidence take priority.
+5. Verification plans do not execute commands. Run selected builds or tests only when needed and permitted by the user, then feed failures into an available investigation tool.
 
-1. Establish target: call `prepare_csharp_workspace` from the repository root or a user-provided solution directory, then use its selected solution or selected instance.
-2. Check readiness: `check_visual_studio_csharp_navigator_health`.
-3. Route through the task-level entry point first: edit/change tasks use `prepare_csharp_edit_task`, review tasks use `prepare_csharp_change_review`, verification tasks use `prepare_csharp_verification_run`, and runtime/debug exception triage uses `investigate_csharp_runtime_exception`.
-4. Use `get_csharp_task_context` only when no task-specific entry fits, or when you need a lower-level mixed context package with custom symbol/file/project scope.
-5. Inspect only what the task package identifies as primary: EvidencePacket resources, source snippets, definitions, references, callers/callees, impact, diagnostics, build issues, debugger context, and recommended next actions.
-6. Run selected shell build/test commands explicitly when verification is needed, then feed failures back into `investigate_csharp_build_failure`, `analyze_csharp_build_errors`, or `start_csharp_investigation`.
+## Older Server Fallback
 
-Treat whole-solution diagnostics as background. Current-task evidence from changed files, build triage, requested file/project/symbol, and scoped diagnostics wins.
+- If the client tool list does not contain `get_csharp_workflow_capabilities`, route directly from the actual tool list. Do not repeatedly invoke missing tools, automatically install upgrades for routing, or substitute a performance snapshot for discovery.
+- Check candidates below in order, calling only tools that exist and fit the task. If a registered tool reports unsupported bridge behavior or version mismatch, preserve the diagnostic and do not claim equivalent semantic evidence from fallback.
+
+| Task | Preferred Entry | Older Candidates |
+| --- | --- | --- |
+| Edit | `prepare_csharp_edit_task` | `get_csharp_task_context`, `start_csharp_investigation` |
+| Review | `prepare_csharp_change_review` | `review_csharp_change`, `audit_csharp_area` |
+| Verification Planning | `prepare_csharp_verification_run` | `plan_csharp_regression_scope`, `plan_csharp_verification` |
+| Build Failure | `investigate_csharp_build_failure` | `analyze_csharp_build_errors` for existing logs; `start_csharp_investigation` for bridge context |
+| Runtime Problem | `investigate_csharp_runtime_exception` | `prepare_debug_session`, read-only `get_debugger_status` and call-stack tools |
+| Mutation Outcome | `get_csharp_operation_status` | No safe automatic replay fallback; retain the original request and target for manual state confirmation |
+
+- If no suitable entry exists, use bounded local source or log reads and disclose the missing semantic evidence. Missing preview, apply, or status tools do not authorize UI automation or repeated mutations to bypass safety requirements.
+
+## Mutation Timeout Recovery
+
+- A mutating call timing out, being cancelled, or losing its connection does not mean it was not executed. This includes source apply, debugger controls, and potentially side-effecting expression evaluation. Never directly retry the original call or use a new `requestId` to bypass an unknown outcome.
+- If `get_csharp_operation_status` is registered, always pass an explicit original `targetInstanceId`, `targetPipeName`, or `targetSolutionPath`. With a receipt, query its original `requestId` precisely; `includeResponse=true` is allowed only when a `requestId` is specified. Do not switch targets or guess request identifiers. Server registration does not prove target VSIX query support.
+- If MCP cancellation prevents receipt delivery, omit `requestId` and list recent records for the same explicit original target (10 by default, at most 20), keeping `includeResponse=false`. These records are only evidence for reconciliation: never automatically select a record and replay its operation, and never assume the latest record belongs to the interrupted call.
+- While pending, use only bounded status queries; when completed, use the recorded result. Unknown, not found, query failure, cancellation, or unsupported status does not prove absence of side effects: stop automatic mutation and reconcile workspace state.
+- If an older server lacks the query tool, the target is ambiguous, or recent records do not establish the outcome, stop automatic retries and report uncertainty. Consider further mutation only after reconciling the result and actual state, reassessing risk, and obtaining any required authorization.
 
 ## Agentic Task Entry Points
 
@@ -276,7 +296,7 @@ Treat whole-solution diagnostics as background. Current-task evidence from chang
 - Use `prepare_debug_session` before mutating debugger state. It gathers health, current debugger status, breakpoints, call stack, source snippets, and recommended next actions; start/continue/step/stop still require explicit Debug Control tools and explicit targets.
 - Use `batch_evaluate_debug_expressions` only in break mode when several independent values from the same frame are needed. Keep `allowSideEffects=false` unless the user explicitly authorizes debugger-side effects; the tool caps requests at 20 expressions and preserves per-expression errors.
 - Use `plan_csharp_debug_scenario` before multi-step debugging. It creates explicit configure/start/wait/collect/cleanup steps without changing Visual Studio state.
-- Use `get_csharp_workflow_performance_snapshot` when assessing tool availability, workflow benchmark commands, large-solution performance setup, context budgets, bridge state, and telemetry hints. It does not run benchmarks.
+- Use `get_csharp_workflow_performance_snapshot` only for explicit performance, telemetry, or budget investigation. It is not the default availability check or a workflow prerequisite; use lightweight capability discovery to find tools.
 - Use `analyze_csharp_repo_workflow` and `generate_csharp_agent_instructions` to draft repository onboarding instructions with solution selection, build/test commands, noisy paths, artifact hints, and tool routing. These tools do not write AGENTS.md or Copilot instruction files.
 - Use `split_csharp_agent_work` to create bounded child-agent packets with file/symbol scope, allowed tools, evidence resources, and budgets; use `merge_csharp_agent_findings` to detect missing packets and merge child-agent findings before editing shared files.
 - Treat these packs as compressed evidence and routing tools. They do not replace explicit shell build/test execution, real source edits, or user approval for mutating operations.
@@ -346,13 +366,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\plugins\visual-studio
 - `analyze_csharp_build_errors` is a log triage tool. It does not run builds and does not require Visual Studio to be open.
 - `get_csharp_diagnostics` is for Roslyn compiler/analyzer diagnostics from the loaded Visual Studio workspace. It is not a replacement for `dotnet build`, MSBuild, or RTK build-log extraction.
 - `get_csharp_diagnostics` ranks returned items by `RelevanceScore` before truncation. Read `ScopeReasons` to explain why an item is relevant, for example `changed file`, `requested file`, `include pattern: ...`, `project scope`, or `known noise path`.
-- `noiseProfile` controls built-in known-noise handling for diagnostics. Use the default `Auto` for normal current-task work: unscoped diagnostics suppress known-noise paths such as `ACADPlugins`, `TZData_src`, `obj`, `bin`, `generated`, `vendor`, or `packages`; focused diagnostics only mark them as `known noise path` instead of hiding them. Use `Filter` to always suppress known-noise paths, `Penalize` to always return but lower-rank them, and `Off` for full audits where no built-in penalty or filter should apply.
+- `noiseProfile` controls generic generated-file, dependency-directory, and repository-configured noise handling. Default `Auto` filters known noise only for unscoped diagnostics and marks it for focused diagnostics; `Filter` always filters, `Penalize` lowers ranking, and `Off` disables noise filtering and penalties for full audits. Business-specific paths must come from the current repository configuration or explicit user scope, not another project's exclusion examples.
 - When `noiseProfile=Auto` or `noiseProfile=Filter` suppresses diagnostics, read and report `DiagnosticsFilteredByNoiseProfile: ...` and `DiagnosticsAutoNoiseFilter: ...` diagnostics so users know known-noise items were intentionally hidden.
 - Always pass `changedFiles` when the current task has known edited files. This lets diagnostics in the current change outrank pre-existing large-solution noise.
 - When the user asks about C# build failures and no build output is available, first use `start_csharp_investigation` or `plan_csharp_verification` to harvest the VS Build Output fallback if Visual Studio is open. If that output is missing, stale, or inconclusive, run a compact build command and feed the captured output into `analyze_csharp_build_errors`.
 - Use `check_visual_studio_csharp_navigator_health(includeDiagnosticsPreview=true, ...)` when you need a quick readiness check plus a small scoped diagnostics preview.
 - Read `get_csharp_workspace_status` before build/test planning when Visual Studio context matters. Use `activeConfigurationName`, `activePlatformName`, `startupProjects`, and `projects[].targetFrameworks` to avoid guessing the active VS context. `projects` is a compressed summary and may be partial; check `isProjectListPartial`.
-- In health results, inspect `expectedBridgeProtocolVersion`, each instance's `bridgeProtocolVersion`, `extensionAssemblyVersion`, and `extensionFileVersion`. If health returns `VersionMismatch` or `BridgeProtocolMismatch`, install the matching packaged VSIX and restart Visual Studio before trusting semantic/debug results.
+- In health results, inspect `expectedBridgeProtocolVersion` and the target's `bridgeProtocolVersion`, `extensionAssemblyVersion`, and `extensionFileVersion`. On `VersionMismatch` or `BridgeProtocolMismatch`, stop trusting affected semantic/debug results and report the issue; install or restart only after explicit user authorization.
 - Use `get_visual_studio_error_list` as a fast read-only snapshot of the current Visual Studio Error List UI when you need VS-side context. Treat it as supporting evidence only: build output and scoped Roslyn diagnostics remain the primary proof for compiler/analyzer failures.
 - Use `get_visual_studio_output_window(paneName="Build")` when you need to inspect the raw Build pane yourself. It returns only the tail of the requested Output Window pane; the investigation and verification planner tools already use this pane automatically as a fallback.
 - `ServerCacheHit: ...` diagnostics mean the MCP server reused a bounded, short-lived read-only result for performance. Treat it as normal metadata, not as a VSIX failure; rerun with a different target/scope or after a few seconds if you need a fresh Roslyn read.
@@ -362,8 +382,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\plugins\visual-studio
   2. `includePathPatterns` for changed files, touched folders, or the feature area under investigation.
   3. `projectName` for touched projects.
   4. Whole-solution diagnostics only as a background scan.
-- Use `excludePathPatterns` to suppress known noisy folders such as generated, vendored, legacy, or host-specific plugin projects. Example: exclude `src\ACADPlugins`, `TZData_src`, `**\obj\**`, or other known unrelated folders.
-- Prefer explicit `excludePathPatterns` for project-specific noise. Keep `noiseProfile=Auto` as the fast default for broad diagnostics in known noisy solutions, and switch to `noiseProfile=Off` when auditing every diagnostic matters more than precision.
+- Use `excludePathPatterns` only for paths confirmed unrelated to the current task; do not hardcode business modules as noise. Reusable business-specific noise rules belong in repository configuration, with exclusions disclosed and scope chosen deliberately for full audits.
+- When registered, use `capture_csharp_diagnostic_baseline` before a change and `compare_csharp_diagnostics_to_baseline` afterward for the same target and scope to distinguish existing from new issues. On older servers without baseline tools, retain scoped before/after diagnostics and disclose the limitation.
 - If whole-solution diagnostics and scoped diagnostics disagree, report both clearly: scoped diagnostics are the primary signal for the current task; whole-solution diagnostics may be pre-existing noise.
 - After `search_csharp_symbols`, prefer passing the returned `symbolKey` to references/callers/callees/impact tools. Avoid line/column lookup when a symbol key is already available.
 - When the user only provides a symbol name and asks for references, prefer `find_csharp_references_by_symbol_search` with `containingType`, `projectName`, or `kind` filters when available. If it reports `AmbiguousSymbolSearch`, show the candidates and ask for or infer a narrower filter from project context before retrying.

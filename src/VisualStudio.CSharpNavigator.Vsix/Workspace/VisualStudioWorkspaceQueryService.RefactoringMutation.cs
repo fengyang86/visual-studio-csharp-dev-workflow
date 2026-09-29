@@ -18,6 +18,7 @@ using Microsoft.CodeAnalysis.Simplification;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.VisualStudio.ComponentModelHost;
 using VisualStudio.CSharpNavigator.Protocol;
+using VisualStudio.CSharpNavigator.Roslyn;
 using VisualStudio.CSharpNavigator.Vsix.Bridge;
 
 namespace VisualStudio.CSharpNavigator.Vsix.Workspace;
@@ -131,6 +132,7 @@ internal sealed partial class VisualStudioWorkspaceQueryService
 
         var solution = symbolResult.Solution!;
         var symbol = symbolResult.Symbol!;
+        var expectedWorkspaceVersion = WorkspaceSnapshotIdentity.GetVersion(solution);
         var descriptor = CreateDescriptor(symbol, solution, cancellationToken);
         if (descriptor?.Span is null)
         {
@@ -230,6 +232,27 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             {
                 return Failure<RenameApplyResult>(
                     workspaceResult.Diagnostic ?? "WorkspaceUnavailable: VisualStudioWorkspace is not available.");
+            }
+
+            if (!string.Equals(WorkspaceSnapshotIdentity.GetVersion(workspaceResult.Workspace.CurrentSolution),
+                    expectedWorkspaceVersion,
+                    StringComparison.Ordinal))
+            {
+                const string versionFailure = "WorkspaceVersionChanged: The workspace changed during rename computation; re-preview before applying.";
+                diagnostics.Add(versionFailure);
+                return Success(
+                    new[]
+                    {
+                        new RenameApplyResult
+                        {
+                            Applied = false,
+                            Preview = preview,
+                            ApplyFailure = versionFailure,
+                            MutationResult = CreateMutationApplyResult(false, preview.MutationPreview, versionFailure),
+                        },
+                    },
+                    diagnostics,
+                    isPartial: true);
             }
 
             if (!workspaceResult.Workspace.TryApplyChanges(renamedSolution))
@@ -343,20 +366,65 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         CSharpCleanupApplyRequest request,
         CancellationToken cancellationToken)
     {
-        var previewResult = await PreviewCleanupAsync(request, cancellationToken).ConfigureAwait(false);
-        if (previewResult.Items.Count == 0)
+        var validation = ValidateCleanupRequest(request);
+        if (validation is not null)
         {
-            return new WorkspaceQueryResult<CSharpCleanupApplyResult>
-            {
-                Diagnostics = previewResult.Diagnostics,
-                IsPartial = true,
-            };
+            return Failure<CSharpCleanupApplyResult>(validation);
         }
 
-        var preview = previewResult.Items[0];
-        var diagnostics = new List<string>(previewResult.Diagnostics)
+        var solutionResult = await GetRequiredSolutionAsync(cancellationToken).ConfigureAwait(false);
+        if (solutionResult.Failure is not null)
+        {
+            return solutionResult.Failure.As<CSharpCleanupApplyResult>();
+        }
+
+        // Compute the preview and the changed solution from ONE snapshot, gate on
+        // that preview, and apply that exact solution. The previous shape gated on
+        // a preview built from an earlier snapshot and then recomputed a fresh,
+        // unpreviewed solution for the apply.
+        var solution = solutionResult.Solution!;
+        var expectedWorkspaceVersion = WorkspaceSnapshotIdentity.GetVersion(solution);
+        var diagnostics = new List<string>
         {
             "Cleanup apply uses VisualStudioWorkspace.TryApplyChanges after preview safety checks.",
+        };
+
+        var documents = await ResolveCleanupDocumentsAsync(solution, request, diagnostics, cancellationToken).ConfigureAwait(false);
+        if (documents.Count == 0)
+        {
+            return Failure<CSharpCleanupApplyResult>("CleanupScopeEmpty: no C# documents matched the requested cleanup scope.");
+        }
+
+        Solution cleanedSolution;
+        try
+        {
+            cleanedSolution = await CreateCleanupSolutionAsync(solution, documents, request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            BridgeLog.Error("C# cleanup apply failed while computing the cleanup solution.", ex);
+            return Failure<CSharpCleanupApplyResult>("CleanupPreviewFailed: " + ex.Message);
+        }
+
+        var mutationPreview = await CreateWorkspaceMutationPreviewAsync(
+                WorkspaceMutationKind.Cleanup,
+                "csharp_cleanup",
+                solution,
+                cleanedSolution,
+                request.MaxTextChanges,
+                request.MaxSnippetLength,
+                request.IncludeGeneratedCode,
+                diagnostics,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        AddDefaultMutationBlockers(mutationPreview);
+        var preview = new CSharpCleanupPreview
+        {
+            ScopeKind = request.ScopeKind,
+            ScopeValues = GetCleanupScopeValues(request).ToArray(),
+            Operations = NormalizeCleanupOperations(request.Operations).ToArray(),
+            MutationPreview = mutationPreview,
         };
 
         var blocker = GetCleanupApplyBlocker(preview.MutationPreview, request);
@@ -378,15 +446,6 @@ internal sealed partial class VisualStudioWorkspaceQueryService
                 isPartial: true);
         }
 
-        var solutionResult = await GetRequiredSolutionAsync(cancellationToken).ConfigureAwait(false);
-        if (solutionResult.Failure is not null)
-        {
-            return solutionResult.Failure.As<CSharpCleanupApplyResult>();
-        }
-
-        var documents = await ResolveCleanupDocumentsAsync(solutionResult.Solution!, request, diagnostics, cancellationToken).ConfigureAwait(false);
-        var cleanedSolution = await CreateCleanupSolutionAsync(solutionResult.Solution!, documents, request, cancellationToken).ConfigureAwait(false);
-
         try
         {
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
@@ -395,6 +454,27 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             {
                 return Failure<CSharpCleanupApplyResult>(
                     workspaceResult.Diagnostic ?? "WorkspaceUnavailable: VisualStudioWorkspace is not available.");
+            }
+
+            if (!string.Equals(WorkspaceSnapshotIdentity.GetVersion(workspaceResult.Workspace.CurrentSolution),
+                    expectedWorkspaceVersion,
+                    StringComparison.Ordinal))
+            {
+                const string versionFailure = "WorkspaceVersionChanged: The workspace changed during cleanup computation; re-preview before applying.";
+                diagnostics.Add(versionFailure);
+                return Success(
+                    new[]
+                    {
+                        new CSharpCleanupApplyResult
+                        {
+                            Applied = false,
+                            Preview = preview,
+                            ApplyFailure = versionFailure,
+                            MutationResult = CreateMutationApplyResult(false, preview.MutationPreview, versionFailure),
+                        },
+                    },
+                    diagnostics,
+                    isPartial: true);
             }
 
             if (!workspaceResult.Workspace.TryApplyChanges(cleanedSolution))
@@ -659,6 +739,13 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             return CreateCodeFixApplyBlockedResult(request, replay.Preview, replay.ActionTitle, failure, diagnostics);
         }
 
+        if (string.IsNullOrWhiteSpace(request.ExpectedChangeFingerprint)
+            || !string.Equals(request.ExpectedChangeFingerprint, replay.Preview.ChangeFingerprint, StringComparison.Ordinal))
+        {
+            const string failure = "MutationChangesChanged: The change fingerprint is missing or the actual diff has changed; re-preview with a matching workspace version.";
+            return CreateCodeFixApplyBlockedResult(request, replay.Preview, replay.ActionTitle, failure, diagnostics);
+        }
+
         if (replay.Preview.Blockers.Count > 0)
         {
             const string failure = "MutationPreviewBlocked: current CodeAction preview has safety blockers.";
@@ -682,6 +769,13 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             {
                 return Failure<CSharpCodeFixApplyResult>(
                     workspaceResult.Diagnostic ?? "WorkspaceUnavailable: VisualStudioWorkspace is not available.");
+            }
+
+            if (!string.Equals(WorkspaceSnapshotIdentity.GetVersion(workspaceResult.Workspace.CurrentSolution),
+                    request.ExpectedWorkspaceVersion, StringComparison.Ordinal))
+            {
+                const string failure = "WorkspaceVersionChanged: The workspace changed during preview replay; re-preview.";
+                return CreateCodeFixApplyBlockedResult(request, replay.Preview, replay.ActionTitle, failure, diagnostics);
             }
 
             if (!workspaceResult.Workspace.TryApplyChanges(changedSolution))
@@ -822,6 +916,13 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             return CreateCodeFixApplyBlockedResult(request, replay.Preview, replay.ActionTitle, failure, diagnostics);
         }
 
+        if (string.IsNullOrWhiteSpace(request.ExpectedChangeFingerprint)
+            || !string.Equals(request.ExpectedChangeFingerprint, replay.Preview.ChangeFingerprint, StringComparison.Ordinal))
+        {
+            const string failure = "MutationChangesChanged: The change fingerprint is missing or the actual diff has changed; re-preview with a matching workspace version.";
+            return CreateCodeFixApplyBlockedResult(request, replay.Preview, replay.ActionTitle, failure, diagnostics);
+        }
+
         if (replay.Preview.Blockers.Count > 0)
         {
             const string failure = "MutationPreviewBlocked: current Fix All preview has safety blockers.";
@@ -845,6 +946,13 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             {
                 return Failure<CSharpCodeFixApplyResult>(
                     workspaceResult.Diagnostic ?? "WorkspaceUnavailable: VisualStudioWorkspace is not available.");
+            }
+
+            if (!string.Equals(WorkspaceSnapshotIdentity.GetVersion(workspaceResult.Workspace.CurrentSolution),
+                    request.ExpectedWorkspaceVersion, StringComparison.Ordinal))
+            {
+                const string failure = "WorkspaceVersionChanged: The workspace changed during preview replay; re-preview.";
+                return CreateCodeFixApplyBlockedResult(request, replay.Preview, replay.ActionTitle, failure, diagnostics);
             }
 
             if (!workspaceResult.Workspace.TryApplyChanges(changedSolution))
@@ -1234,7 +1342,8 @@ internal sealed partial class VisualStudioWorkspaceQueryService
 
         preview.WorkspaceVersion = CreateWorkspaceVersion(selection.Document!.Project.Solution);
         preview.CandidateIdentity = CreateCodeFixCandidateIdentity(request, selection.Action!, selection.ProviderName!, selection.Document!, selection.Diagnostic!);
-        preview.SessionId = CreateMutationSessionId(WorkspaceMutationKind.CodeFix, request.DiagnosticId, preview.CandidateIdentity.StableKey);
+        preview.SessionId = CreateMutationSessionId(WorkspaceMutationKind.CodeFix, request.DiagnosticId,
+            preview.CandidateIdentity.StableKey, preview.WorkspaceVersion, preview.ChangeFingerprint);
         AddDefaultMutationBlockers(preview);
 
         return CodeFixPreviewReplay.Success(
@@ -1324,7 +1433,8 @@ internal sealed partial class VisualStudioWorkspaceQueryService
 
         preview.WorkspaceVersion = CreateWorkspaceVersion(selection.Document!.Project.Solution);
         preview.CandidateIdentity = CreateCodeFixCandidateIdentity(request, selection.Action!, selection.ProviderName!, selection.Document!, selection.Diagnostic!);
-        preview.SessionId = CreateMutationSessionId(WorkspaceMutationKind.FixAll, request.DiagnosticId, preview.CandidateIdentity.StableKey);
+        preview.SessionId = CreateMutationSessionId(WorkspaceMutationKind.FixAll, request.DiagnosticId,
+            preview.CandidateIdentity.StableKey, preview.WorkspaceVersion, preview.ChangeFingerprint);
         AddDefaultMutationBlockers(preview);
 
         return CodeFixPreviewReplay.Success(
@@ -1632,15 +1742,7 @@ internal sealed partial class VisualStudioWorkspaceQueryService
 
     private static string CreateWorkspaceVersion(Solution solution)
     {
-        return string.Join(
-            "|",
-            solution.FilePath ?? string.Empty,
-            solution.Projects.Count().ToString(System.Globalization.CultureInfo.InvariantCulture),
-            string.Join(
-                ",",
-                solution.Projects
-                    .OrderBy(project => project.Id.Id)
-                    .Select(project => project.Version.ToString())));
+        return WorkspaceSnapshotIdentity.GetVersion(solution);
     }
 
     private static async Task<IReadOnlyList<Document>> ResolveCodeFixDocumentsAsync(
@@ -2197,7 +2299,9 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         CancellationToken cancellationToken)
     {
         var changedDocumentIds = new HashSet<DocumentId>();
-        var unsupportedDocumentChanges = 0;
+        var solutionChanges = newSolution.GetChanges(oldSolution);
+        var unsupportedDocumentChanges = solutionChanges.GetAddedProjects().Count()
+            + solutionChanges.GetRemovedProjects().Count();
         foreach (var projectChanges in newSolution.GetChanges(oldSolution).GetProjectChanges())
         {
             foreach (var documentId in projectChanges.GetChangedDocuments())
@@ -2207,6 +2311,24 @@ internal sealed partial class VisualStudioWorkspaceQueryService
 
             unsupportedDocumentChanges += projectChanges.GetAddedDocuments().Count();
             unsupportedDocumentChanges += projectChanges.GetRemovedDocuments().Count();
+            unsupportedDocumentChanges += projectChanges.GetAddedAdditionalDocuments().Count()
+                + projectChanges.GetRemovedAdditionalDocuments().Count()
+                + projectChanges.GetChangedAdditionalDocuments().Count()
+                + projectChanges.GetAddedAnalyzerConfigDocuments().Count()
+                + projectChanges.GetRemovedAnalyzerConfigDocuments().Count()
+                + projectChanges.GetChangedAnalyzerConfigDocuments().Count();
+            var before = oldSolution.GetProject(projectChanges.ProjectId)!;
+            var after = newSolution.GetProject(projectChanges.ProjectId)!;
+            if (!Equals(before.ParseOptions, after.ParseOptions)
+                || !Equals(before.CompilationOptions, after.CompilationOptions)
+                || before.Name != after.Name || before.AssemblyName != after.AssemblyName
+                || before.FilePath != after.FilePath || before.OutputFilePath != after.OutputFilePath
+                || !before.ProjectReferences.SequenceEqual(after.ProjectReferences)
+                || !before.MetadataReferences.SequenceEqual(after.MetadataReferences)
+                || !before.AnalyzerReferences.SequenceEqual(after.AnalyzerReferences))
+            {
+                unsupportedDocumentChanges++;
+            }
         }
 
         var documents = new List<WorkspaceMutationDocumentPreview>();
@@ -2231,6 +2353,12 @@ internal sealed partial class VisualStudioWorkspaceQueryService
 
             var oldText = await oldDocument.GetTextAsync(cancellationToken).ConfigureAwait(false);
             var newText = await newDocument.GetTextAsync(cancellationToken).ConfigureAwait(false);
+            if (oldDocument.Name != newDocument.Name || oldDocument.FilePath != newDocument.FilePath
+                || oldDocument.SourceCodeKind != newDocument.SourceCodeKind
+                || !oldDocument.Folders.SequenceEqual(newDocument.Folders))
+            {
+                unsupportedDocumentChanges++;
+            }
             var textChanges = newText.GetTextChanges(oldText).OrderBy(change => change.Span.Start).ToArray();
             if (textChanges.Length == 0)
             {
@@ -2308,6 +2436,9 @@ internal sealed partial class VisualStudioWorkspaceQueryService
 
         var preview = new WorkspaceMutationPreview
         {
+            WorkspaceVersion = WorkspaceSnapshotIdentity.GetVersion(oldSolution),
+            ChangeFingerprint = await WorkspaceSnapshotIdentity.GetChangeFingerprintAsync(
+                oldSolution, newSolution, cancellationToken).ConfigureAwait(false),
             Kind = kind,
             OperationName = operationName,
             HasConflicts = false,
@@ -2452,14 +2583,15 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         return CreateMutationSessionId(kind, request.DiagnosticId, CreateCodeFixCandidateIdentity(request).StableKey);
     }
 
-    private static string CreateMutationSessionId(WorkspaceMutationKind kind, string diagnosticId, string stableKey)
+    private static string CreateMutationSessionId(
+        WorkspaceMutationKind kind, string diagnosticId, string stableKey,
+        string workspaceVersion = "", string changeFingerprint = "")
     {
-        return string.Join(
-            ":",
-            "mutation",
-            kind.ToString().ToLowerInvariant(),
-            diagnosticId,
-            unchecked((uint)StringComparer.OrdinalIgnoreCase.GetHashCode(stableKey)).ToString("X8"));
+        var identity = System.Text.Json.JsonSerializer.Serialize(
+            new[] { kind.ToString(), diagnosticId, stableKey, workspaceVersion, changeFingerprint });
+        using var hash = System.Security.Cryptography.SHA256.Create();
+        return "mutation:" + BitConverter.ToString(hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(identity)))
+            .Replace("-", string.Empty);
     }
 
     private static string CreateMutationCandidateStableKey(
@@ -2836,5 +2968,360 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         }
 
         return conflicts;
+    }
+
+    public async Task<WorkspaceQueryResult<CSharpTextEditPreview>> PreviewTextEditAsync(
+        CSharpTextEditRequest request,
+        CancellationToken cancellationToken)
+    {
+        var validation = ValidateTextEditRequest(request);
+        if (validation is not null)
+        {
+            return Failure<CSharpTextEditPreview>(validation);
+        }
+
+        var diagnostics = new List<string>
+        {
+            "Text edit preview computes Roslyn text changes against the current document text; it does not write files or the workspace.",
+        };
+
+        var computed = await ComputeTextEditSolutionAsync(request, diagnostics, cancellationToken).ConfigureAwait(false);
+        if (computed.Failure is not null)
+        {
+            return computed.Failure;
+        }
+
+        var mutationPreview = await CreateWorkspaceMutationPreviewAsync(
+                WorkspaceMutationKind.TextEdit,
+                "csharp_text_edit",
+                computed.Solution!,
+                computed.ChangedSolution!,
+                request.MaxTextChanges,
+                request.MaxSnippetLength,
+                request.IncludeGeneratedCode,
+                diagnostics,
+                cancellationToken)
+            .ConfigureAwait(false);
+        AddDefaultMutationBlockers(mutationPreview);
+
+        var preview = new CSharpTextEditPreview
+        {
+            FilePath = request.FilePath,
+            MutationPreview = mutationPreview,
+        };
+
+        return Success(
+            new[] { preview },
+            diagnostics,
+            mutationPreview.IsTruncated
+                || mutationPreview.OmittedGeneratedDocumentCount > 0
+                || mutationPreview.UnsupportedDocumentChangeCount > 0);
+    }
+
+    public async Task<WorkspaceQueryResult<CSharpTextEditApplyResult>> ApplyTextEditAsync(
+        CSharpTextEditApplyRequest request,
+        CancellationToken cancellationToken)
+    {
+        var validation = ValidateTextEditRequest(request);
+        if (validation is not null)
+        {
+            return Failure<CSharpTextEditApplyResult>(validation);
+        }
+
+        var diagnostics = new List<string>
+        {
+            "Text edit apply computes Roslyn text changes against one snapshot and applies them through VisualStudioWorkspace.TryApplyChanges so open buffers update in place.",
+        };
+
+        var computed = await ComputeTextEditSolutionAsync(request, diagnostics, cancellationToken).ConfigureAwait(false);
+        if (computed.Failure is not null)
+        {
+            return new WorkspaceQueryResult<CSharpTextEditApplyResult>
+            {
+                Diagnostics = computed.Failure.Diagnostics,
+                IsPartial = true,
+                Succeeded = false,
+            };
+        }
+
+        var mutationPreview = await CreateWorkspaceMutationPreviewAsync(
+                WorkspaceMutationKind.TextEdit,
+                "csharp_text_edit",
+                computed.Solution!,
+                computed.ChangedSolution!,
+                request.MaxTextChanges,
+                request.MaxSnippetLength,
+                request.IncludeGeneratedCode,
+                diagnostics,
+                cancellationToken)
+            .ConfigureAwait(false);
+        AddDefaultMutationBlockers(mutationPreview);
+
+        var preview = new CSharpTextEditPreview
+        {
+            FilePath = request.FilePath,
+            MutationPreview = mutationPreview,
+        };
+
+        var blocker = GetTextEditApplyBlocker(preview.MutationPreview, request);
+        if (blocker is not null)
+        {
+            diagnostics.Add(blocker.Message);
+            return Success(
+                new[]
+                {
+                    new CSharpTextEditApplyResult
+                    {
+                        Applied = false,
+                        Preview = preview,
+                        ApplyFailure = blocker.Message,
+                        MutationResult = CreateMutationApplyResult(false, preview.MutationPreview, blocker.Message),
+                    },
+                },
+                diagnostics,
+                isPartial: true);
+        }
+
+        try
+        {
+            await _package.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            var workspaceResult = await TryGetWorkspaceAsync(cancellationToken).ConfigureAwait(true);
+            if (workspaceResult.Workspace is null)
+            {
+                return Failure<CSharpTextEditApplyResult>(
+                    workspaceResult.Diagnostic ?? "WorkspaceUnavailable: VisualStudioWorkspace is not available.");
+            }
+
+            if (!string.Equals(WorkspaceSnapshotIdentity.GetVersion(workspaceResult.Workspace.CurrentSolution),
+                    computed.ExpectedWorkspaceVersion,
+                    StringComparison.Ordinal))
+            {
+                const string versionFailure = "WorkspaceVersionChanged: The workspace changed during text edit computation; re-preview before applying.";
+                diagnostics.Add(versionFailure);
+                return Success(
+                    new[]
+                    {
+                        new CSharpTextEditApplyResult
+                        {
+                            Applied = false,
+                            Preview = preview,
+                            ApplyFailure = versionFailure,
+                            MutationResult = CreateMutationApplyResult(false, preview.MutationPreview, versionFailure),
+                        },
+                    },
+                    diagnostics,
+                    isPartial: true);
+            }
+
+            if (!workspaceResult.Workspace.TryApplyChanges(computed.ChangedSolution!))
+            {
+                const string failure = "TryApplyChangesFailed: VisualStudioWorkspace rejected the text edit solution.";
+                return Success(
+                    new[]
+                    {
+                        new CSharpTextEditApplyResult
+                        {
+                            Applied = false,
+                            Preview = preview,
+                            ApplyFailure = failure,
+                            MutationResult = CreateMutationApplyResult(false, preview.MutationPreview, failure),
+                        },
+                    },
+                    diagnostics,
+                    isPartial: true);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            BridgeLog.Error("C# text edit apply failed while applying changes.", ex);
+            return Failure<CSharpTextEditApplyResult>("TryApplyChangesFailed: " + ex.Message);
+        }
+
+        diagnostics.Add("Text edit apply completed through VisualStudioWorkspace.TryApplyChanges.");
+        return Success(
+            new[]
+            {
+                new CSharpTextEditApplyResult
+                {
+                    Applied = true,
+                    Preview = preview,
+                    MutationResult = CreateMutationApplyResult(true, preview.MutationPreview, string.Empty),
+                },
+            },
+            diagnostics,
+            preview.MutationPreview.IsTruncated
+                || preview.MutationPreview.OmittedGeneratedDocumentCount > 0
+                || preview.MutationPreview.UnsupportedDocumentChangeCount > 0);
+    }
+
+    private static string? ValidateTextEditRequest(CSharpTextEditRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.FilePath))
+        {
+            return "FilePathRequired: a target document path is required.";
+        }
+
+        if (request.Edits.Count == 0)
+        {
+            return "EditsRequired: at least one text edit is required.";
+        }
+
+        if (request.Edits.Count > 500)
+        {
+            return "TooManyEdits: at most 500 edits per request.";
+        }
+
+        foreach (var edit in request.Edits)
+        {
+            if (edit.StartLine < 1
+                || edit.StartColumn < 1
+                || edit.EndLine < 1
+                || edit.EndColumn < 1
+                || edit.EndLine < edit.StartLine
+                || (edit.EndLine == edit.StartLine && edit.EndColumn < edit.StartColumn))
+            {
+                return "TextEditInvalidRange: every edit needs 1-based lines/columns with an end position at or after the start position.";
+            }
+        }
+
+        if (request.MaxTextChanges is < 1 or > 1000)
+        {
+            return "MaxTextChanges must be between 1 and 1000.";
+        }
+
+        if (request.MaxSnippetLength is < 20 or > 4000)
+        {
+            return "MaxSnippetLength must be between 20 and 4000.";
+        }
+
+        return null;
+    }
+
+    private async Task<TextEditComputationResult> ComputeTextEditSolutionAsync(
+        CSharpTextEditRequest request,
+        List<string> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var solutionResult = await GetRequiredSolutionAsync(cancellationToken).ConfigureAwait(false);
+        if (solutionResult.Failure is not null)
+        {
+            return new TextEditComputationResult { Failure = solutionResult.Failure.As<CSharpTextEditPreview>() };
+        }
+
+        var solution = solutionResult.Solution!;
+        var document = await FindDocumentByPathAsync(solution, request.FilePath, request.IncludeGeneratedCode, cancellationToken)
+            .ConfigureAwait(false);
+        if (document is null)
+        {
+            return new TextEditComputationResult
+            {
+                Failure = Failure<CSharpTextEditPreview>(
+                    $"DocumentNotFound: '{request.FilePath}' is not a C# document in the active solution."),
+            };
+        }
+
+        var sourceText = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        TextChange[] changes;
+        try
+        {
+            changes = CreateTextChanges(sourceText, request.Edits);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new TextEditComputationResult
+            {
+                Failure = Failure<CSharpTextEditPreview>("TextEditInvalidSpan: " + ex.Message),
+            };
+        }
+
+        var changedText = sourceText.WithChanges(changes);
+        var changedSolution = solution.WithDocumentText(document.Id, changedText);
+        return new TextEditComputationResult
+        {
+            Solution = solution,
+            ChangedSolution = changedSolution,
+            ExpectedWorkspaceVersion = WorkspaceSnapshotIdentity.GetVersion(solution),
+        };
+    }
+
+    private static TextChange[] CreateTextChanges(SourceText sourceText, IReadOnlyList<CSharpTextEdit> edits)
+    {
+        var ordered = new List<KeyValuePair<TextSpan, string>>(edits.Count);
+        foreach (var edit in edits)
+        {
+            var start = GetTextOffset(sourceText, edit.StartLine, edit.StartColumn);
+            var end = GetTextOffset(sourceText, edit.EndLine, edit.EndColumn);
+            if (end < start)
+            {
+                throw new InvalidOperationException(
+                    $"edit ending at {edit.EndLine}:{edit.EndColumn} precedes its start at {edit.StartLine}:{edit.StartColumn}.");
+            }
+
+            ordered.Add(new KeyValuePair<TextSpan, string>(TextSpan.FromBounds(start, end), edit.NewText));
+        }
+
+        ordered.Sort((left, right) => left.Key.Start != right.Key.Start
+            ? left.Key.Start.CompareTo(right.Key.Start)
+            : left.Key.End.CompareTo(right.Key.End));
+        for (var index = 1; index < ordered.Count; index++)
+        {
+            if (ordered[index].Key.Start < ordered[index - 1].Key.End)
+            {
+                throw new InvalidOperationException("edits must not overlap; merge or narrow them first.");
+            }
+        }
+
+        return ordered.Select(item => new TextChange(item.Key, item.Value)).ToArray();
+    }
+
+    private static int GetTextOffset(SourceText sourceText, int oneBasedLine, int oneBasedColumn)
+    {
+        var lines = sourceText.Lines;
+        if (oneBasedLine > lines.Count)
+        {
+            throw new InvalidOperationException($"line {oneBasedLine} is out of range; the document has {lines.Count} lines.");
+        }
+
+        var line = lines[oneBasedLine - 1];
+        if (oneBasedColumn - 1 > line.Span.Length)
+        {
+            throw new InvalidOperationException(
+                $"column {oneBasedColumn} is out of range on line {oneBasedLine}; the line has {line.Span.Length} characters.");
+        }
+
+        return line.Start + oneBasedColumn - 1;
+    }
+
+    private static WorkspaceMutationBlocker? GetTextEditApplyBlocker(
+        WorkspaceMutationPreview preview,
+        CSharpTextEditApplyRequest request)
+    {
+        if (preview.IsTruncated && !request.AllowTruncatedPreview)
+        {
+            return CreateBlocker(WorkspaceMutationBlockerKind.TruncatedPreview, "TextEditApplyBlocked", "TextEditApplyBlocked: text edit preview was truncated. Increase MaxTextChanges or set AllowTruncatedPreview=true.");
+        }
+
+        if (preview.OmittedGeneratedDocumentCount > 0 && !request.AllowGeneratedDocumentChanges)
+        {
+            return CreateBlocker(WorkspaceMutationBlockerKind.GeneratedDocumentChanges, "TextEditApplyBlocked", "TextEditApplyBlocked: generated document changes were omitted. Retry with IncludeGeneratedCode=true and AllowGeneratedDocumentChanges=true if intentional.");
+        }
+
+        if (preview.UnsupportedDocumentChangeCount > 0 && !request.AllowUnsupportedDocumentChanges)
+        {
+            return CreateBlocker(WorkspaceMutationBlockerKind.UnsupportedDocumentChanges, "TextEditApplyBlocked", "TextEditApplyBlocked: text edits produced added/removed document changes that are not represented as text diffs.");
+        }
+
+        return null;
+    }
+
+    private sealed class TextEditComputationResult
+    {
+        public WorkspaceQueryResult<CSharpTextEditPreview>? Failure { get; set; }
+
+        public Solution? Solution { get; set; }
+
+        public Solution? ChangedSolution { get; set; }
+
+        public string? ExpectedWorkspaceVersion { get; set; }
     }
 }

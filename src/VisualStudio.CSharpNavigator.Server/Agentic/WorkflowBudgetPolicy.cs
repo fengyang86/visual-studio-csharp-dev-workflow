@@ -10,7 +10,7 @@ public sealed class WorkflowBudgetPolicy
         {
             MaxToolCalls = 4,
             MaxReturnedChars = Math.Max(4000, request.MaxSourceSnippets * Math.Max(1000, request.MaxCharsPerSnippet)),
-            MaxElapsedMilliseconds = 30000,
+            MaxElapsedMilliseconds = NormalizeDeadline(request.MaxElapsedMilliseconds),
             MaxProjects = 20,
             MaxDiagnostics = request.MaxDiagnostics,
             MaxReferences = request.MaxRelatedItems,
@@ -24,7 +24,7 @@ public sealed class WorkflowBudgetPolicy
         {
             MaxToolCalls = 5,
             MaxReturnedChars = 24000,
-            MaxElapsedMilliseconds = 30000,
+            MaxElapsedMilliseconds = NormalizeDeadline(request.MaxElapsedMilliseconds),
             MaxProjects = 20,
             MaxDiagnostics = request.MaxDiagnostics,
             MaxReferences = request.MaxRelatedItems,
@@ -38,7 +38,7 @@ public sealed class WorkflowBudgetPolicy
         {
             MaxToolCalls = 5,
             MaxReturnedChars = 20000,
-            MaxElapsedMilliseconds = 30000,
+            MaxElapsedMilliseconds = NormalizeDeadline(request.MaxElapsedMilliseconds),
             MaxProjects = 20,
             MaxDiagnostics = request.MaxDiagnostics,
             MaxReferences = request.MaxRelatedItems,
@@ -52,11 +52,16 @@ public sealed class WorkflowBudgetPolicy
         {
             MaxToolCalls = request.ArtifactPaths.Length > 0 ? 5 : 4,
             MaxReturnedChars = Math.Max(12000, request.MaxSourceSnippets * Math.Max(1000, request.MaxCharsPerSnippet)),
-            MaxElapsedMilliseconds = 30000,
+            MaxElapsedMilliseconds = NormalizeDeadline(request.MaxElapsedMilliseconds),
             MaxProjects = 10,
             MaxDiagnostics = 0,
             MaxReferences = request.MaxFrames,
             AllowWholeSolution = false,
         };
+    }
+
+    private static int NormalizeDeadline(int value)
+    {
+        return Math.Clamp(value, 1000, 55000);
     }
 }

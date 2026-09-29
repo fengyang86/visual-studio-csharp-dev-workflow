@@ -16,7 +16,7 @@ public sealed class AgenticWorkflowTools
     }
 
     [McpServerTool(Name = "prepare_csharp_edit_task", ReadOnly = true, Idempotent = true)]
-    [Description("Prepare a read-only Agentic C# edit task packet with evidence, candidate edit locations, bounded source context, next actions, and safety blockers.")]
+    [Description("Prepare a read-only Agentic C# edit task packet with evidence, candidate edit locations, bounded source context, next actions, and safety blockers. Prefer this over get_csharp_task_context and start_csharp_investigation for feature work, bug fixes, and any task likely to edit C# files; it is the V2 entry with evidence resources and detail levels. Result shape: items[] (typed results), diagnostics[] (string notes), isPartial (bool, true when truncated), succeeded (bool, false only on rejection), errorCode (optional string, from the first diagnostic code prefix).")]
     public Task<WorkspaceQueryResult<CSharpEditTaskResult>> PrepareCSharpEditTask(
         [Description("Short problem statement or task context for the edit task.")]
         string? problemText = null,
@@ -112,7 +112,7 @@ public sealed class AgenticWorkflowTools
     }
 
     [McpServerTool(Name = "prepare_csharp_change_review", ReadOnly = true, Idempotent = true)]
-    [Description("Prepare a read-only Agentic C# change review packet with risks, test gaps, candidate edit locations, evidence resources, and safety blockers.")]
+    [Description("Prepare a read-only Agentic C# change review packet with risks, test gaps, candidate edit locations, evidence resources, and safety blockers. Prefer this over review_csharp_change when reviewing local changes; review_csharp_change is the legacy fixed-size bundle for older servers.")]
     public Task<WorkspaceQueryResult<CSharpChangeReviewTaskResult>> PrepareCSharpChangeReview(
         [Description("Short problem statement or change summary for the review.")]
         string? problemText = null,
@@ -193,7 +193,7 @@ public sealed class AgenticWorkflowTools
     }
 
     [McpServerTool(Name = "prepare_csharp_verification_run", ReadOnly = true, Idempotent = true)]
-    [Description("Prepare a read-only Agentic C# verification run packet with smoke, focused, and broad build/test command tiers plus evidence resources and safety blockers.")]
+    [Description("Prepare a read-only Agentic C# verification run packet with smoke, focused, and broad build/test command tiers plus evidence resources and safety blockers. Prefer this over plan_csharp_verification and plan_csharp_regression_scope when choosing what to build or test after edits; execute the selected shell commands explicitly afterwards.")]
     public Task<WorkspaceQueryResult<CSharpVerificationRunTaskResult>> PrepareCSharpVerificationRun(
         [Description("Short problem statement or change summary for verification planning.")]
         string? problemText = null,

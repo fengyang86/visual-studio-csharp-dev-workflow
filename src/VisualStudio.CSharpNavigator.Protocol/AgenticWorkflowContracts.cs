@@ -158,6 +158,19 @@ public sealed class WorkflowTelemetry
     public bool CacheHit { get; set; }
 
     public string[] PartialReasons { get; set; } = Array.Empty<string>();
+
+    public bool DeadlineExceeded { get; set; }
+
+    public int DeadlineMilliseconds { get; set; }
+
+    public WorkflowPhaseTiming[] PhaseTimings { get; set; } = Array.Empty<WorkflowPhaseTiming>();
+}
+
+public sealed class WorkflowPhaseTiming
+{
+    public string Name { get; set; } = string.Empty;
+
+    public long ElapsedMilliseconds { get; set; }
 }
 
 public sealed class SafetyBlocker
@@ -191,9 +204,11 @@ public sealed class CSharpEditTaskRequest
 
     public string? ProjectName { get; set; }
 
-    public CodeDiagnosticSeverity? MinimumSeverity { get; set; } = CodeDiagnosticSeverity.Warning;
+    public CodeDiagnosticSeverity? MinimumSeverity { get; set; }
 
     public CodeDiagnosticNoiseProfile NoiseProfile { get; set; } = CodeDiagnosticNoiseProfile.Auto;
+
+    public CodeDiagnosticCollectionMode CollectionMode { get; set; } = CodeDiagnosticCollectionMode.Auto;
 
     public bool IncludeWholeSolutionDiagnostics { get; set; }
 
@@ -218,6 +233,8 @@ public sealed class CSharpEditTaskRequest
     public bool IncludeGeneratedCode { get; set; }
 
     public WorkflowResponseDetailLevel DetailLevel { get; set; } = WorkflowResponseDetailLevel.Compact;
+
+    public int MaxElapsedMilliseconds { get; set; } = 30000;
 
     public string? WorkspaceContextLeaseId { get; set; }
 
@@ -244,9 +261,11 @@ public sealed class CSharpChangeReviewTaskRequest
 
     public string[] ExcludePathPatterns { get; set; } = Array.Empty<string>();
 
-    public CodeDiagnosticSeverity? MinimumSeverity { get; set; } = CodeDiagnosticSeverity.Warning;
+    public CodeDiagnosticSeverity? MinimumSeverity { get; set; }
 
     public CodeDiagnosticNoiseProfile NoiseProfile { get; set; } = CodeDiagnosticNoiseProfile.Auto;
+
+    public CodeDiagnosticCollectionMode CollectionMode { get; set; } = CodeDiagnosticCollectionMode.Auto;
 
     public int MaxBuildIssues { get; set; } = 20;
 
@@ -261,6 +280,8 @@ public sealed class CSharpChangeReviewTaskRequest
     public bool IncludeGeneratedCode { get; set; }
 
     public WorkflowResponseDetailLevel DetailLevel { get; set; } = WorkflowResponseDetailLevel.Compact;
+
+    public int MaxElapsedMilliseconds { get; set; } = 30000;
 
     public string? WorkspaceContextLeaseId { get; set; }
 
@@ -289,9 +310,11 @@ public sealed class CSharpVerificationRunTaskRequest
 
     public string? ProjectName { get; set; }
 
-    public CodeDiagnosticSeverity? MinimumSeverity { get; set; } = CodeDiagnosticSeverity.Warning;
+    public CodeDiagnosticSeverity? MinimumSeverity { get; set; }
 
     public CodeDiagnosticNoiseProfile NoiseProfile { get; set; } = CodeDiagnosticNoiseProfile.Auto;
+
+    public CodeDiagnosticCollectionMode CollectionMode { get; set; } = CodeDiagnosticCollectionMode.Auto;
 
     public bool IncludeVisualStudioBuildOutput { get; set; } = true;
 
@@ -308,6 +331,8 @@ public sealed class CSharpVerificationRunTaskRequest
     public bool IncludeGeneratedCode { get; set; }
 
     public WorkflowResponseDetailLevel DetailLevel { get; set; } = WorkflowResponseDetailLevel.Compact;
+
+    public int MaxElapsedMilliseconds { get; set; } = 30000;
 
     public string? WorkspaceContextLeaseId { get; set; }
 
@@ -337,6 +362,8 @@ public sealed class CSharpRuntimeExceptionTaskRequest
     public bool IncludeGeneratedCode { get; set; }
 
     public WorkflowResponseDetailLevel DetailLevel { get; set; } = WorkflowResponseDetailLevel.Compact;
+
+    public int MaxElapsedMilliseconds { get; set; } = 30000;
 
     public string? WorkspaceContextLeaseId { get; set; }
 

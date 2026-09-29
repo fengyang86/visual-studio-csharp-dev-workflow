@@ -19,14 +19,14 @@ public sealed class WorkspaceContextLeaseStore
             {
                 PipeName = target.PipeName,
                 InstanceId = target.InstanceId,
-                SolutionPath = target.SolutionPath,
+                SolutionPath = string.IsNullOrWhiteSpace(target.SolutionPath) ? solutionPath : target.SolutionPath,
             },
             SolutionPath = solutionPath,
             IssuedUtc = now,
             ExpiresUtc = now.Add(DefaultTimeToLive),
         };
         _leases[lease.LeaseId] = lease;
-        return lease;
+        return Copy(lease);
     }
 
     public bool TryGet(string? leaseId, out WorkspaceContextLease lease)
@@ -44,9 +44,18 @@ public sealed class WorkspaceContextLeaseStore
             return false;
         }
 
-        lease = cached;
+        lease = Copy(cached);
         return true;
     }
+
+    private static WorkspaceContextLease Copy(WorkspaceContextLease lease) => new()
+    {
+        LeaseId = lease.LeaseId,
+        Target = WorkspaceTargetIdentity.Copy(lease.Target),
+        SolutionPath = lease.SolutionPath,
+        IssuedUtc = lease.IssuedUtc,
+        ExpiresUtc = lease.ExpiresUtc,
+    };
 
     private void RemoveExpired()
     {

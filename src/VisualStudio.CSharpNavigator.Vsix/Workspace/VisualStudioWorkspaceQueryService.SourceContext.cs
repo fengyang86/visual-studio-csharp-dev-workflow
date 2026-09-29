@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using VisualStudio.CSharpNavigator.Protocol;
+using VisualStudio.CSharpNavigator.Roslyn;
 
 namespace VisualStudio.CSharpNavigator.Vsix.Workspace;
 
@@ -106,9 +107,18 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             return solutionResult.Failure.As<SourceContextSnippet>();
         }
 
+        return await GetSourceContextFromSolutionAsync(request, solutionResult.Solution!, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<WorkspaceQueryResult<SourceContextSnippet>> GetSourceContextFromSolutionAsync(
+        SourceContextRequest request,
+        Solution solution,
+        CancellationToken cancellationToken)
+    {
         var position = request.Position!;
         var document = await FindDocumentByPathAsync(
-                solutionResult.Solution!,
+                solution,
                 position.FilePath,
                 request.IncludeGeneratedCode,
                 cancellationToken)
@@ -156,6 +166,73 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             new[] { "SourcePosition", DescribeSourceContextKind(sourceNode) });
 
         return Success(new[] { snippet }, isPartial: snippet.IsTextTruncated);
+    }
+
+    public async Task<WorkspaceQueryResult<SourceContextSnippet>> GetSourceContextsAsync(
+        BatchSourceContextRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Positions is null || request.Positions.Length == 0)
+        {
+            return Failure<SourceContextSnippet>("Positions is required.");
+        }
+
+        if (request.Positions.Length > 100)
+        {
+            return Failure<SourceContextSnippet>("Positions cannot contain more than 100 items.");
+        }
+
+        if (request.ContextLines is < 0 or > 50 || request.MaxCharsPerPosition is < 200 or > 100000)
+        {
+            return Failure<SourceContextSnippet>("Batch source context limits are out of range.");
+        }
+
+        var snippets = new List<SourceContextSnippet>();
+        var diagnostics = new List<string>();
+        var isPartial = false;
+        var solutionResult = await GetRequiredSolutionAsync(cancellationToken).ConfigureAwait(false);
+        if (solutionResult.Failure is not null)
+        {
+            return solutionResult.Failure.As<SourceContextSnippet>();
+        }
+
+        var solution = solutionResult.Solution!;
+        var workspaceVersion = WorkspaceSnapshotIdentity.GetVersion(solution);
+        if (!string.IsNullOrWhiteSpace(request.ExpectedWorkspaceVersion)
+            && !string.Equals(request.ExpectedWorkspaceVersion, workspaceVersion, StringComparison.Ordinal))
+        {
+            return Failure<SourceContextSnippet>(
+                $"WorkspaceVersionChanged: expected '{request.ExpectedWorkspaceVersion}' but active snapshot is '{workspaceVersion}'.");
+        }
+        diagnostics.Add($"WorkspaceSnapshotVersion: {workspaceVersion}");
+        foreach (var position in request.Positions)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await GetSourceContextFromSolutionAsync(
+                    new SourceContextRequest
+                    {
+                        Target = request.Target,
+                        Position = new SourceSpan
+                        {
+                            FilePath = position.FilePath,
+                            StartLine = position.Line,
+                            StartColumn = position.Column,
+                        },
+                        ContextLines = request.ContextLines,
+                        MaxChars = request.MaxCharsPerPosition,
+                        MaxSnippets = 1,
+                        IncludeGeneratedCode = request.IncludeGeneratedCode,
+                    },
+                    solution,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            snippets.AddRange(result.Items);
+            diagnostics.AddRange(result.Diagnostics.Select(diagnostic =>
+                $"SourceContext[{position.FilePath}:{position.Line}:{position.Column}]: {diagnostic}"));
+            isPartial |= result.IsPartial;
+        }
+
+        return Success(snippets.ToArray(), diagnostics, isPartial);
     }
 
     public async Task<WorkspaceQueryResult<DocumentSymbolNode>> ListDocumentSymbolsAsync(

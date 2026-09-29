@@ -41,46 +41,87 @@ internal sealed partial class VisualStudioWorkspaceQueryService
 
         var results = new List<SymbolDescriptor>();
         var seenResults = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var project in solution.Projects.Where(project => project.Language == LanguageNames.CSharp))
+
+        // Prefer the precomputed symbol index: one full enumeration per
+        // generation builds (symbol, displayString) pairs, and subsequent
+        // queries scan those strings without touching Roslyn per-document
+        // APIs (measured ~400ms -> double-digit ms for namespace queries).
+        var index = await GetSymbolSearchIndexAsync(solution, request.IncludeGeneratedCode, diagnostics, cancellationToken)
+            .ConfigureAwait(false);
+        if (index is not null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            foreach (var document in await EnumerateProjectDocumentsAsync(project, request.IncludeGeneratedCode, diagnostics, cancellationToken)
-                         .ConfigureAwait(false))
+            foreach (var entry in index)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!request.IncludeGeneratedCode && IsGeneratedDocument(document))
+                if (!MatchesIndexedQuery(entry, request.QueryText))
                 {
                     continue;
                 }
 
-                var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
-                var syntaxRoot = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-                if (semanticModel is null || syntaxRoot is null)
+                var descriptor = CreateDescriptor(entry.Symbol, entry.Project, cancellationToken);
+                if (descriptor?.Span is null)
                 {
-                    diagnostics.Add($"Document '{document.FilePath ?? document.Name}' has no semantic model or syntax root.");
-                    isPartial = true;
                     continue;
                 }
 
-                foreach (var symbol in EnumerateDeclaredSymbols(syntaxRoot, semanticModel, cancellationToken))
+                if (!seenResults.Add(CreateSymbolDescriptorIdentity(descriptor)))
                 {
-                    if (!MatchesQuery(symbol, request.QueryText))
+                    continue;
+                }
+
+                results.Add(descriptor);
+                if (results.Count >= request.MaxResults * 4)
+                {
+                    // Soft cap to bound worst-case scans; ordering happens later.
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // Index unavailable (fresh solution, unsupported content); fall back
+            // to the direct per-document enumeration.
+            foreach (var project in solution.Projects.Where(project => project.Language == LanguageNames.CSharp))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var document in await EnumerateProjectDocumentsAsync(project, request.IncludeGeneratedCode, diagnostics, cancellationToken)
+                             .ConfigureAwait(false))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!request.IncludeGeneratedCode && IsGeneratedDocument(document))
                     {
                         continue;
                     }
 
-                    var descriptor = CreateDescriptor(symbol, project, cancellationToken);
-                    if (descriptor?.Span is null)
+                    var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+                    var syntaxRoot = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+                    if (semanticModel is null || syntaxRoot is null)
                     {
+                        diagnostics.Add($"Document '{document.FilePath ?? document.Name}' has no semantic model or syntax root.");
+                        isPartial = true;
                         continue;
                     }
 
-                    if (!seenResults.Add(CreateSymbolDescriptorIdentity(descriptor)))
+                    foreach (var symbol in EnumerateDeclaredSymbols(syntaxRoot, semanticModel, cancellationToken))
                     {
-                        continue;
-                    }
+                        if (!MatchesQuery(symbol, request.QueryText))
+                        {
+                            continue;
+                        }
 
-                    results.Add(descriptor);
+                        var descriptor = CreateDescriptor(symbol, project, cancellationToken);
+                        if (descriptor?.Span is null)
+                        {
+                            continue;
+                        }
+
+                        if (!seenResults.Add(CreateSymbolDescriptorIdentity(descriptor)))
+                        {
+                            continue;
+                        }
+
+                        results.Add(descriptor);
+                    }
                 }
             }
         }
@@ -298,6 +339,122 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         }
 
         return Success(new[] { CreateSymbolDescription(symbolResult.Symbol!, descriptor, cancellationToken) });
+    }
+
+    // Snapshot-level symbol search index: one full enumeration per generation
+    // precomputes (symbol, prebuilt display string) pairs so subsequent queries
+    // scan those strings without re-enumerating documents or calling per-symbol
+    // Roslyn APIs. Generation guard mirrors the document path index (project +
+    // document counts unchanged => reuse across workspace version churn).
+    private static readonly object SymbolIndexGate = new();
+    private static SymbolSearchIndexEntry[]? LastSymbolIndex;
+    private static (int Projects, int Documents) LastSymbolIndexGeneration;
+    private static bool LastSymbolIndexIncludesGenerated;
+
+    private sealed class SymbolSearchIndexEntry
+    {
+        public ISymbol Symbol = null!;
+        public Project Project = null!;
+        public string Name = string.Empty;
+        public string? ContainingTypeName;
+        public string DisplayString = string.Empty;
+    }
+
+    private async Task<SymbolSearchIndexEntry[]?> GetSymbolSearchIndexAsync(
+        Solution solution,
+        bool includeGeneratedCode,
+        List<string> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var projectCount = 0;
+        var documentCount = 0;
+        foreach (var project in solution.Projects)
+        {
+            projectCount++;
+            documentCount += project.DocumentIds.Count;
+        }
+
+        lock (SymbolIndexGate)
+        {
+            if (LastSymbolIndex is { } cached
+                && LastSymbolIndexGeneration.Projects == projectCount
+                && LastSymbolIndexGeneration.Documents == documentCount
+                && LastSymbolIndexIncludesGenerated == includeGeneratedCode)
+            {
+                return cached;
+            }
+        }
+
+        // Build outside the lock; concurrent builders are idempotent.
+        var entries = new List<SymbolSearchIndexEntry>();
+        var buildDiagnostics = new List<string>();
+        foreach (var project in solution.Projects.Where(project => project.Language == LanguageNames.CSharp))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var document in await EnumerateProjectDocumentsAsync(project, includeGeneratedCode, buildDiagnostics, cancellationToken)
+                         .ConfigureAwait(false))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!includeGeneratedCode && IsGeneratedDocument(document))
+                {
+                    continue;
+                }
+
+                var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+                var syntaxRoot = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+                if (semanticModel is null || syntaxRoot is null)
+                {
+                    continue;
+                }
+
+                foreach (var symbol in EnumerateDeclaredSymbols(syntaxRoot, semanticModel, cancellationToken))
+                {
+                    entries.Add(new SymbolSearchIndexEntry
+                    {
+                        Symbol = symbol,
+                        Project = project,
+                        Name = symbol.Name ?? string.Empty,
+                        ContainingTypeName = symbol.ContainingType?.Name,
+                        DisplayString = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+                    });
+                }
+            }
+        }
+
+        var array = entries.ToArray();
+        lock (SymbolIndexGate)
+        {
+            LastSymbolIndex = array;
+            LastSymbolIndexGeneration = (projectCount, documentCount);
+            LastSymbolIndexIncludesGenerated = includeGeneratedCode;
+        }
+
+        diagnostics.Add($"SymbolIndexBuilt: {array.Length} symbols indexed across {projectCount} projects.");
+        return array;
+    }
+
+    private static bool MatchesIndexedQuery(SymbolSearchIndexEntry entry, string queryText)
+    {
+        if (entry.Name.IndexOf(queryText, StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        if (!queryText.Contains('.'))
+        {
+            if (entry.ContainingTypeName is not null
+                && entry.ContainingTypeName.IndexOf(queryText, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+        else if (entry.ContainingTypeName is not null
+            && (entry.ContainingTypeName + "." + entry.Name).IndexOf(queryText, StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        return entry.DisplayString.IndexOf(queryText, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
 }

@@ -15,7 +15,7 @@ public sealed class WorkspaceHealthTools
     }
 
     [McpServerTool(Name = "get_csharp_workspace_status", ReadOnly = true, Idempotent = true)]
-    [Description("Return the active Visual Studio C# workspace status through the local VSIX bridge.")]
+    [Description("Return the active Visual Studio C# workspace status through the local VSIX bridge. Result shape: items[] (typed results), diagnostics[] (string notes), isPartial (bool, true when truncated), succeeded (bool, false only on rejection), errorCode (optional string, from the first diagnostic code prefix).")]
     public Task<WorkspaceQueryResult<WorkspaceStatus>> GetCSharpWorkspaceStatus(
         [Description("Optional target Visual Studio bridge pipe name. Highest priority when provided.")]
         string? targetPipeName = null,

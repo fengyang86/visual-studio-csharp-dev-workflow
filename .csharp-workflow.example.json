@@ -1,0 +1,8 @@
+{
+  "diagnostics": {
+    "noisePathPatterns": [
+      "**/legacy-generated/**",
+      "**/vendor-adapter/**"
+    ]
+  }
+}

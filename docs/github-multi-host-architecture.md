@@ -48,7 +48,7 @@ flowchart LR
 | 用户配置自动写入 | Codex installer | 不做，提供片段 | 提供 `Install-DshMcpServer.ps1`，带备份写入 cordis patch |
 | 真实端到端 smoke | 已完成 | 发布前应完成 | 已完成 |
 
-Codex 是增强入口而不是核心依赖。Claude Code 和 DeepSeekHarness 没有与 Codex 等价的个人插件机制时，仍可通过标准 MCP 使用 83 个工具和 15 个资源模板。DeepSeekHarness 不消费 `mcpServers` JSON；它通过 Cordis patch 层（`cordis.patch.yml`）实例化内置 `@deepseek-ai/dsh-mcp-client` 插件来启动 stdio MCP server，工具名前缀为 `mcp__visual_studio_csharp_navigator__`。
+Codex 是增强入口而不是核心依赖。Claude Code 和 DeepSeekHarness 没有与 Codex 等价的个人插件机制时，仍可通过标准 MCP 使用 96 个工具和 15 个资源模板。DeepSeekHarness 不消费 `mcpServers` JSON；它通过 Cordis patch 层（`cordis.patch.yml`）实例化内置 `@deepseek-ai/dsh-mcp-client` 插件来启动 stdio MCP server，工具名前缀为 `mcp__visual_studio_csharp_navigator__`。
 
 ## 配置契约
 

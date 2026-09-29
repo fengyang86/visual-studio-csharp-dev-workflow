@@ -210,8 +210,10 @@ function Invoke-VsixInstaller {
     )
 
     Write-Detail "$Label`: $VsixInstallerPath $(Join-ProcessArguments $Arguments)"
-    & $VsixInstallerPath @Arguments
-    $exitCode = $LASTEXITCODE
+    $installer = Start-Process -FilePath $VsixInstallerPath `
+        -ArgumentList (Join-ProcessArguments $Arguments) `
+        -WindowStyle Hidden -Wait -PassThru
+    $exitCode = $installer.ExitCode
     if ($exitCode -ne 0) {
         throw "$Label failed with exit code $exitCode."
     }

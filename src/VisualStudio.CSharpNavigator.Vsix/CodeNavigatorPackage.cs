@@ -35,7 +35,7 @@ public sealed class CodeNavigatorPackage : AsyncPackage
         _registry = new BridgeInstanceRegistry(queryService);
         await _registry.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
-        _bridgeServer = new VisualStudioBridgeServer(_registry, queryService, debugContextService, debugControlService);
+        _bridgeServer = new VisualStudioBridgeServer(_registry, queryService, debugContextService, debugControlService, package: this);
         _bridgeServer.Start();
         BridgeLog.Info($"Visual Studio C# Dev Workflow bridge started. InstanceId={_registry.InstanceId}; PipeName={_registry.PipeName}.");
     }

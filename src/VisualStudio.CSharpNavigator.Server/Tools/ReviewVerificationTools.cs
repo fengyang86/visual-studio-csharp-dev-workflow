@@ -15,7 +15,7 @@ public sealed class ReviewVerificationTools
     }
 
     [McpServerTool(Name = "start_csharp_investigation", ReadOnly = true, Idempotent = true)]
-    [Description("Start a read-only C# investigation by combining bridge health, optional build-log triage, scoped diagnostics, symbol lookup, and related context.")]
+    [Description("Start a read-only C# investigation by combining bridge health, optional build-log triage, scoped diagnostics, symbol lookup, and related context. Prefer prepare_csharp_edit_task for edit-oriented tasks and investigate_csharp_build_failure when build output or an open VS Build pane exists; use this for broad open-ended investigation or on older servers without the packet entries. Result shape: items[] (typed results), diagnostics[] (string notes), isPartial (bool, true when truncated), succeeded (bool, false only on rejection), errorCode (optional string, from the first diagnostic code prefix).")]
     public Task<WorkspaceQueryResult<CSharpInvestigationReport>> StartCSharpInvestigation(
         string? problemText = null,
         string? buildOutput = null,
@@ -28,6 +28,7 @@ public sealed class ReviewVerificationTools
         string? projectName = null,
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         bool includeWholeSolutionDiagnostics = false,
         bool includeVisualStudioBuildOutput = true,
         int maxVisualStudioBuildOutputCharacters = 20000,
@@ -41,11 +42,11 @@ public sealed class ReviewVerificationTools
         string? targetSolutionPath = null,
         CancellationToken cancellationToken = default)
     {
-        return _inner.StartCSharpInvestigation(problemText, buildOutput, buildLogFilePath, symbolQuery, filePath, includePathPatterns, excludePathPatterns, changedFiles, projectName, minimumSeverity, noiseProfile, includeWholeSolutionDiagnostics, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxSymbols, maxRelatedItems, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
+        return _inner.StartCSharpInvestigation(problemText, buildOutput, buildLogFilePath, symbolQuery, filePath, includePathPatterns, excludePathPatterns, changedFiles, projectName, minimumSeverity, noiseProfile, collectionMode, includeWholeSolutionDiagnostics, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxSymbols, maxRelatedItems, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
     }
 
     [McpServerTool(Name = "get_csharp_task_context", ReadOnly = true, Idempotent = true)]
-    [Description("Create a compact task context package for C# work by combining investigation evidence with bounded source snippets for likely edit locations.")]
+    [Description("Create a compact task context package for C# work by combining investigation evidence with bounded source snippets for likely edit locations. Lower-level fallback with custom symbol/file/project scope; prefer prepare_csharp_edit_task when the packet entry is available.")]
     public Task<WorkspaceQueryResult<CSharpTaskContextPackage>> GetCSharpTaskContext(
         string? problemText = null,
         string? buildOutput = null,
@@ -58,6 +59,7 @@ public sealed class ReviewVerificationTools
         string? projectName = null,
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         bool includeWholeSolutionDiagnostics = false,
         bool includeVisualStudioBuildOutput = true,
         int maxVisualStudioBuildOutputCharacters = 20000,
@@ -74,11 +76,11 @@ public sealed class ReviewVerificationTools
         string? targetSolutionPath = null,
         CancellationToken cancellationToken = default)
     {
-        return _inner.GetCSharpTaskContext(problemText, buildOutput, buildLogFilePath, symbolQuery, filePath, includePathPatterns, excludePathPatterns, changedFiles, projectName, minimumSeverity, noiseProfile, includeWholeSolutionDiagnostics, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxSymbols, maxRelatedItems, maxSourceSnippets, contextLines, maxCharsPerSnippet, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
+        return _inner.GetCSharpTaskContext(problemText, buildOutput, buildLogFilePath, symbolQuery, filePath, includePathPatterns, excludePathPatterns, changedFiles, projectName, minimumSeverity, noiseProfile, collectionMode, includeWholeSolutionDiagnostics, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxSymbols, maxRelatedItems, maxSourceSnippets, contextLines, maxCharsPerSnippet, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
     }
 
     [McpServerTool(Name = "plan_csharp_verification", ReadOnly = true, Idempotent = true)]
-    [Description("Create a read-only verification plan for changed C# files by combining build triage, scoped diagnostics, affected projects, related tests, and dotnet command suggestions.")]
+    [Description("Create a read-only verification plan for changed C# files by combining build triage, scoped diagnostics, affected projects, related tests, and dotnet command suggestions. Legacy planner; prefer prepare_csharp_verification_run when the newer packet entry is available.")]
     public Task<WorkspaceQueryResult<CSharpVerificationPlan>> PlanCSharpVerification(
         string? buildOutput = null,
         string? buildLogFilePath = null,
@@ -90,6 +92,7 @@ public sealed class ReviewVerificationTools
         string? projectName = null,
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         bool includeWholeSolutionDiagnostics = false,
         bool includeVisualStudioBuildOutput = true,
         int maxVisualStudioBuildOutputCharacters = 20000,
@@ -102,7 +105,7 @@ public sealed class ReviewVerificationTools
         string? targetSolutionPath = null,
         CancellationToken cancellationToken = default)
     {
-        return _inner.PlanCSharpVerification(buildOutput, buildLogFilePath, changedFiles, symbolQuery, filePath, includePathPatterns, excludePathPatterns, projectName, minimumSeverity, noiseProfile, includeWholeSolutionDiagnostics, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxRelatedTests, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
+        return _inner.PlanCSharpVerification(buildOutput, buildLogFilePath, changedFiles, symbolQuery, filePath, includePathPatterns, excludePathPatterns, projectName, minimumSeverity, noiseProfile, collectionMode, includeWholeSolutionDiagnostics, includeVisualStudioBuildOutput, maxVisualStudioBuildOutputCharacters, maxBuildIssues, maxDiagnostics, maxRelatedTests, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
     }
 
     [McpServerTool(Name = "audit_csharp_area", ReadOnly = true, Idempotent = true)]
@@ -135,7 +138,7 @@ public sealed class ReviewVerificationTools
     }
 
     [McpServerTool(Name = "review_csharp_change", ReadOnly = true, Idempotent = true)]
-    [Description("Create a read-only semantic review package for changed C# files or a focused symbol, including impact, risks, test gaps, temporary markers, and verification next actions.")]
+    [Description("Create a read-only semantic review package for changed C# files or a focused symbol, including impact, risks, test gaps, temporary markers, and verification next actions. Legacy review bundle; prefer prepare_csharp_change_review when the newer packet entry is available.")]
     public Task<WorkspaceQueryResult<CSharpChangeReviewReport>> ReviewCSharpChange(
         string? problemText = null,
         string? buildOutput = null,
@@ -148,6 +151,7 @@ public sealed class ReviewVerificationTools
         string[]? excludePathPatterns = null,
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         int maxBuildIssues = 20,
         int maxDiagnostics = 30,
         int maxSymbols = 20,
@@ -159,6 +163,6 @@ public sealed class ReviewVerificationTools
         string? targetSolutionPath = null,
         CancellationToken cancellationToken = default)
     {
-        return _inner.ReviewCSharpChange(problemText, buildOutput, buildLogFilePath, changedFiles, areaPaths, symbolQuery, projectName, includePathPatterns, excludePathPatterns, minimumSeverity, noiseProfile, maxBuildIssues, maxDiagnostics, maxSymbols, maxRelatedItems, maxFiles, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
+        return _inner.ReviewCSharpChange(problemText, buildOutput, buildLogFilePath, changedFiles, areaPaths, symbolQuery, projectName, includePathPatterns, excludePathPatterns, minimumSeverity, noiseProfile, collectionMode, maxBuildIssues, maxDiagnostics, maxSymbols, maxRelatedItems, maxFiles, includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath, cancellationToken);
     }
 }

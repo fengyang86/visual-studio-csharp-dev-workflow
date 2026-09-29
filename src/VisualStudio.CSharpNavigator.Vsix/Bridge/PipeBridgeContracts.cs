@@ -17,9 +17,16 @@ internal sealed class PipeBridgeRequestEnvelope
 {
     public string ProtocolVersion { get; set; } = PipeBridgeProtocol.Version;
 
+    public string RequestId { get; set; } = string.Empty;
+
     public string Method { get; set; } = string.Empty;
 
     public JsonElement Payload { get; set; }
+}
+
+internal sealed class CancelPipeBridgeRequest
+{
+    public string RequestId { get; set; } = string.Empty;
 }
 
 internal sealed class PipeBridgeResponseEnvelope<TItem>

@@ -195,6 +195,21 @@ public sealed class SourcePositionRequest
     public int Column { get; set; }
 }
 
+public sealed class BatchSourceContextRequest : IVisualStudioBridgeTargetedRequest
+{
+    public VisualStudioBridgeTarget? Target { get; set; }
+
+    public SourcePositionRequest[] Positions { get; set; } = Array.Empty<SourcePositionRequest>();
+
+    public int ContextLines { get; set; } = 3;
+
+    public int MaxCharsPerPosition { get; set; } = 12000;
+
+    public bool IncludeGeneratedCode { get; set; }
+
+    public string? ExpectedWorkspaceVersion { get; set; }
+}
+
 public sealed class DerivedTypesRequest : IVisualStudioBridgeTargetedRequest
 {
     public VisualStudioBridgeTarget? Target { get; set; }

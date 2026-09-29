@@ -5,13 +5,17 @@ namespace VisualStudio.CSharpNavigator.Server.Tests;
 public sealed class DiagnosticsNoisePolicyTests
 {
     [Theory]
-    [InlineData(@"D:\Repo\src\ACADPlugins\Legacy.cs")]
-    [InlineData(@"D:\Repo\TZData_src\TimeZoneData.cs")]
+    [InlineData(@"D:\Repo\src\generated\Legacy.cs")]
+    [InlineData(@"D:\Repo\vendor\TimeZoneData.cs")]
     [InlineData(@"D:\Repo\obj\Debug\Generated.g.cs")]
     [InlineData(@"D:\Repo\src\Feature\Widget.Designer.cs")]
     public void ShouldFilterKnownNoisePath_WhenAutoAndUnscoped_ReturnsTrue(string filePath)
     {
-        var request = new DiagnosticsRequest { NoiseProfile = CodeDiagnosticNoiseProfile.Auto };
+        var request = new DiagnosticsRequest
+        {
+            NoiseProfile = CodeDiagnosticNoiseProfile.Auto,
+            NoisePathPatterns = new[] { "**/legacy/**" },
+        };
 
         Assert.True(DiagnosticsNoisePolicy.ShouldFilterKnownNoisePath(request, filePath));
     }
@@ -22,12 +26,13 @@ public sealed class DiagnosticsNoisePolicyTests
         var request = new DiagnosticsRequest
         {
             NoiseProfile = CodeDiagnosticNoiseProfile.Auto,
-            ChangedFiles = new[] { @"src\ACADPlugins\Legacy.cs" },
+            ChangedFiles = new[] { @"src\legacy\Legacy.cs" },
+            NoisePathPatterns = new[] { "**/legacy/**" },
         };
 
         Assert.False(DiagnosticsNoisePolicy.ShouldFilterKnownNoisePath(
             request,
-            @"D:\Repo\src\ACADPlugins\Legacy.cs"));
+            @"D:\Repo\src\legacy\Legacy.cs"));
     }
 
     [Fact]
@@ -36,12 +41,13 @@ public sealed class DiagnosticsNoisePolicyTests
         var request = new DiagnosticsRequest
         {
             NoiseProfile = CodeDiagnosticNoiseProfile.Filter,
-            FilePath = @"D:\Repo\src\ACADPlugins\Legacy.cs",
+            FilePath = @"D:\Repo\src\legacy\Legacy.cs",
+            NoisePathPatterns = new[] { "**/legacy/**" },
         };
 
         Assert.True(DiagnosticsNoisePolicy.ShouldFilterKnownNoisePath(
             request,
-            @"D:\Repo\src\ACADPlugins\Legacy.cs"));
+            @"D:\Repo\src\legacy\Legacy.cs"));
     }
 
     [Fact]
@@ -51,6 +57,12 @@ public sealed class DiagnosticsNoisePolicyTests
 
         Assert.False(DiagnosticsNoisePolicy.ShouldFilterKnownNoisePath(
             request,
-            @"D:\Repo\TZData_src\TimeZoneData.cs"));
+            @"D:\Repo\src\legacy\TimeZoneData.cs"));
+    }
+
+    [Fact]
+    public void IsKnownNoisePath_DoesNotContainProjectSpecificDefaults()
+    {
+        Assert.False(DiagnosticsNoisePolicy.IsKnownNoisePath(@"D:\Repo\src\legacy\Legacy.cs"));
     }
 }

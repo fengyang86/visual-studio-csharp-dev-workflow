@@ -67,6 +67,8 @@ public sealed class CSharpWorkflowPerformanceSnapshot
 
     public string[] RecommendedProfiles { get; set; } = Array.Empty<string>();
 
+    public string[] Capabilities { get; set; } = Array.Empty<string>();
+
     public string[] SuggestedEnvironmentVariables { get; set; } = Array.Empty<string>();
 
     public CSharpWorkflowBudgetHint[] BudgetHints { get; set; } = Array.Empty<CSharpWorkflowBudgetHint>();

@@ -77,11 +77,17 @@ if (profile.IsCodeFixProfile)
     return;
 }
 
-if (profile.IsWorkflowProfile)
-{
-    await RunWorkflowSmokeAsync(client, profile);
-    return;
-}
+        if (profile.IsWorkflowProfile)
+        {
+            await RunWorkflowSmokeAsync(client, profile);
+            return;
+        }
+
+        if (profile.IsTextEditProfile)
+        {
+            await RunTextEditSmokeAsync(client, profile);
+            return;
+        }
 
 if (profile.IsDebugControlProfile)
 {
@@ -1288,6 +1294,162 @@ static string ExtractFirstSymbolKey(string resultJson)
     return key;
 }
 
+static async Task RunTextEditSmokeAsync(McpClient client, TestProfile profile)
+{
+    var targetArguments = profile.WithTarget(new Dictionary<string, object?>());
+
+    // Resolve the live bridge for the sample solution; the apply contract
+    // requires an explicit target.
+    string instanceId;
+    var instances = await CallAsync(client, "list_visual_studio_instances", new Dictionary<string, object?>
+    {
+        ["includeStale"] = false,
+    });
+    using (var payload = ParseToolPayload(instances))
+    {
+        instanceId = payload.RootElement.GetProperty("items").EnumerateArray()
+            .Where(item => string.Equals(item.GetProperty("solutionPath").GetString(), profile.SolutionPath, StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.GetProperty("instanceId").GetString())
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException(
+                $"No live bridge matches the sample solution '{profile.SolutionPath}'; wait for discovery and retry.");
+    }
+
+    Console.WriteLine("TEXT_EDIT instance={0} document={1} line={2}", instanceId, profile.DocumentPath, profile.ContextLine);
+
+    var applyTargetArguments = new Dictionary<string, object?>
+    {
+        ["targetInstanceId"] = instanceId,
+    };
+
+    async Task<string> PreviewEditAsync(string newText)
+    {
+        var preview = await CallAsync(client, "preview_csharp_text_edits", new Dictionary<string, object?>(targetArguments)
+        {
+            ["filePath"] = profile.DocumentPath,
+            ["edits"] = new List<Dictionary<string, object?>>
+            {
+                new()
+                {
+                    ["startLine"] = profile.ContextLine,
+                    ["startColumn"] = profile.ContextColumn,
+                    ["endLine"] = profile.ContextLine,
+                    ["endColumn"] = profile.ContextColumn + 4,
+                    ["newText"] = newText,
+                },
+            },
+        });
+        return preview;
+    }
+
+    async Task ApplyEditAsync(string newText)
+    {
+        var applied = await CallAsync(client, "apply_csharp_text_edits", new Dictionary<string, object?>(applyTargetArguments)
+        {
+            ["filePath"] = profile.DocumentPath,
+            ["edits"] = new List<Dictionary<string, object?>>
+            {
+                new()
+                {
+                    ["startLine"] = profile.ContextLine,
+                    ["startColumn"] = profile.ContextColumn,
+                    ["endLine"] = profile.ContextLine,
+                    ["endColumn"] = profile.ContextColumn + 4,
+                    ["newText"] = newText,
+                },
+            },
+        });
+        using var payload = ParseToolPayload(applied);
+        AssertTextEditSucceeded(payload);
+        var item = payload.RootElement.GetProperty("items")[0];
+        if (!item.GetProperty("applied").GetBoolean())
+        {
+            throw new InvalidOperationException($"Text edit was not applied: {item}");
+        }
+    }
+
+    async Task<string> ReadContextAsync()
+    {
+        var context = await CallAsync(client, "get_csharp_source_context", new Dictionary<string, object?>(targetArguments)
+        {
+            ["filePath"] = profile.DocumentPath,
+            ["line"] = profile.ContextLine,
+            ["column"] = profile.ContextColumn,
+            ["contextLines"] = 0,
+        });
+        using var payload = ParseToolPayload(context);
+        return payload.RootElement.GetProperty("items")[0].GetProperty("text").GetString() ?? string.Empty;
+    }
+
+    // 1. Preview must report the diff without applying.
+    var previewJson = await PreviewEditAsync("prev");
+    using (var payload = ParseToolPayload(previewJson))
+    {
+        AssertTextEditSucceeded(payload);
+        var mutation = payload.RootElement.GetProperty("items")[0].GetProperty("mutationPreview");
+        var fingerprint = mutation.GetProperty("changeFingerprint").GetString();
+        if (string.IsNullOrWhiteSpace(fingerprint))
+        {
+            throw new InvalidOperationException($"Preview did not include a change fingerprint: {mutation}");
+        }
+
+        if (mutation.GetProperty("totalTextChangeCount").GetInt32() < 1)
+        {
+            throw new InvalidOperationException($"Preview reported no text changes: {mutation}");
+        }
+
+        var blockers = mutation.GetProperty("blockers");
+        if (blockers.GetArrayLength() > 0)
+        {
+            throw new InvalidOperationException($"Preview reported blockers: {blockers}");
+        }
+
+        Console.WriteLine(
+            "TEXT_EDIT_PREVIEW fingerprint={0}... changes={1} documents={2}",
+            fingerprint.Substring(0, Math.Min(12, fingerprint.Length)),
+            mutation.GetProperty("totalTextChangeCount").GetInt32(),
+            mutation.GetProperty("affectedDocumentCount").GetInt32());
+    }
+
+    var afterPreview = await ReadContextAsync();
+    if (afterPreview.Contains("prev", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException("Preview leaked the edit into the document text.");
+    }
+
+    // 2. Apply through the workspace and verify the live document text. Use an
+    // equal-length replacement ("prev" vs "left") so the restore edit targets
+    // the identical span on the modified line.
+    await ApplyEditAsync("prev");
+    var afterApply = await ReadContextAsync();
+    if (!afterApply.Contains("return prev + right;", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"Applied edit is not visible in the live document text: {afterApply}");
+    }
+
+    Console.WriteLine("TEXT_EDIT_APPLIED verified via live source context.");
+
+    // 3. Restore the fixture baseline with the identical span.
+    await ApplyEditAsync("left");
+    var afterRestore = await ReadContextAsync();
+    if (!afterRestore.Contains("return left + right;", StringComparison.Ordinal)
+        || afterRestore.Contains("prev", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"Fixture restore failed: {afterRestore}");
+    }
+
+    Console.WriteLine("TEXT_EDIT_RESTORED fixture baseline verified.");
+}
+
+static void AssertTextEditSucceeded(JsonDocument payload)
+{
+    var root = payload.RootElement;
+    if (root.TryGetProperty("succeeded", out var succeeded) && !succeeded.GetBoolean())
+    {
+        throw new InvalidOperationException($"Text edit call failed: {root}");
+    }
+}
+
 static void RunToolSchemaSmoke(
     IReadOnlyCollection<string> toolNames,
     IList<McpClientTool> tools,
@@ -2475,6 +2637,8 @@ sealed record TestProfile(
 
     public bool IsWorkflowProfile => string.Equals(Name, "workflow", StringComparison.OrdinalIgnoreCase);
 
+    public bool IsTextEditProfile => string.Equals(Name, "text-edit", StringComparison.OrdinalIgnoreCase);
+
     public bool EnforcesGenericSampleExpectations =>
         string.Equals(Name, "generic", StringComparison.OrdinalIgnoreCase)
         && string.Equals(ExpectedSymbolName, "Add", StringComparison.Ordinal)
@@ -2554,6 +2718,35 @@ sealed record TestProfile(
                 string.Empty,
                 1,
                 1);
+        }
+
+        if (string.Equals(profileName, "text-edit", StringComparison.OrdinalIgnoreCase))
+        {
+            var sampleSolution = Path.Combine(
+                workspaceRoot,
+                "artifacts",
+                "sample-csharp-solution",
+                "CodeNavigator.Sample.sln");
+            var sampleDocument = Path.Combine(
+                workspaceRoot,
+                "artifacts",
+                "sample-csharp-solution",
+                "src",
+                "CodeNavigator.Sample",
+                "Calculator.cs");
+
+            return new TestProfile(
+                "text-edit",
+                ReadSetting("CODE_NAVIGATOR_TEST_SOLUTION") ?? sampleSolution,
+                targetPipeName,
+                targetInstanceId,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                ReadSetting("CODE_NAVIGATOR_TEST_DOCUMENT") ?? sampleDocument,
+                ReadIntSetting("CODE_NAVIGATOR_TEST_LINE", 7),
+                ReadIntSetting("CODE_NAVIGATOR_TEST_COLUMN", 16));
         }
 
         if (string.Equals(profileName, "agentic-resources", StringComparison.OrdinalIgnoreCase))

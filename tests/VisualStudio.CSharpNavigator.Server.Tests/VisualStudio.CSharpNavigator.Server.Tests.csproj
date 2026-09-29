@@ -21,6 +21,16 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\VisualStudio.CSharpNavigator.Server\VisualStudio.CSharpNavigator.Server.csproj" />
     <ProjectReference Include="..\..\src\VisualStudio.CSharpNavigator.Roslyn\VisualStudio.CSharpNavigator.Roslyn.csproj" />
+    <ProjectReference Include="..\VisualStudio.CSharpNavigator.Bridge.TestHost\VisualStudio.CSharpNavigator.Bridge.TestHost.csproj" ReferenceOutputAssembly="false" />
+    <Compile Include="..\..\src\VisualStudio.CSharpNavigator.Vsix\Bridge\PipeBridgeContracts.cs" Link="Bridge\PipeBridgeContracts.cs" />
+    <Compile Include="..\..\src\VisualStudio.CSharpNavigator.Vsix\Bridge\PipeBridgeRequestDispatcher.cs" Link="Bridge\PipeBridgeRequestDispatcher.cs" />
   </ItemGroup>
+
+  <Target Name="CopyBridgeTestHost" AfterTargets="Build">
+    <ItemGroup>
+      <BridgeTestHostFiles Include="..\VisualStudio.CSharpNavigator.Bridge.TestHost\bin\$(Configuration)\net8.0\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BridgeTestHostFiles)" DestinationFiles="@(BridgeTestHostFiles->'$(OutDir)bridge-test-host\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

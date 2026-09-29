@@ -18,4 +18,6 @@ public sealed class NamedPipeBridgeOptions
     public int DiscoveryStaleAfterSeconds { get; set; } = 30;
 
     public int ConnectTimeoutMilliseconds { get; set; } = 2000;
+
+    public int ResponseTimeoutMilliseconds { get; set; } = 90_000;
 }

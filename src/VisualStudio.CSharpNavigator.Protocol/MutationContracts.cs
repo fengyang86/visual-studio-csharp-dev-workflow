@@ -11,6 +11,7 @@ public enum WorkspaceMutationKind
     CodeFix = 3,
     FixAll = 4,
     Refactoring = 5,
+    TextEdit = 6,
 }
 
 public enum WorkspaceMutationBlockerKind
@@ -223,6 +224,8 @@ public sealed class WorkspaceMutationPreview
 
     public string WorkspaceVersion { get; set; } = string.Empty;
 
+    public string ChangeFingerprint { get; set; } = string.Empty;
+
     public MutationCandidateIdentity CandidateIdentity { get; set; } = new();
 
     public WorkspaceMutationKind Kind { get; set; }
@@ -408,7 +411,7 @@ public sealed class CSharpCodeFixListRequest : IVisualStudioBridgeTargetedReques
 
     public string? DiagnosticId { get; set; }
 
-    public CodeDiagnosticSeverity? MinimumSeverity { get; set; } = CodeDiagnosticSeverity.Warning;
+    public CodeDiagnosticSeverity? MinimumSeverity { get; set; }
 
     public CodeDiagnosticNoiseProfile NoiseProfile { get; set; } = CodeDiagnosticNoiseProfile.Auto;
 
@@ -469,6 +472,8 @@ public sealed class CSharpCodeFixRequest : IVisualStudioBridgeTargetedRequest
     public string? PreviewSessionId { get; set; }
 
     public string? ExpectedWorkspaceVersion { get; set; }
+
+    public string? ExpectedChangeFingerprint { get; set; }
 
     public int MaxTextChanges { get; set; } = 1000;
 
@@ -560,4 +565,61 @@ public sealed class CSharpRefactoringPlanStep
     public bool RequiresUserApproval { get; set; }
 
     public string StopIf { get; set; } = string.Empty;
+}
+
+// Plain text edits applied through the Visual Studio workspace so open buffers
+// update without external-change reload prompts.
+public sealed class CSharpTextEdit
+{
+    public int StartLine { get; set; }
+
+    public int StartColumn { get; set; }
+
+    public int EndLine { get; set; }
+
+    public int EndColumn { get; set; }
+
+    public string NewText { get; set; } = string.Empty;
+}
+
+public class CSharpTextEditRequest : IVisualStudioBridgeTargetedRequest
+{
+    public VisualStudioBridgeTarget? Target { get; set; }
+
+    public string FilePath { get; set; } = string.Empty;
+
+    public IReadOnlyList<CSharpTextEdit> Edits { get; set; } = Array.Empty<CSharpTextEdit>();
+
+    public int MaxTextChanges { get; set; } = 200;
+
+    public int MaxSnippetLength { get; set; } = 200;
+
+    public bool IncludeGeneratedCode { get; set; }
+}
+
+public sealed class CSharpTextEditPreview
+{
+    public string FilePath { get; set; } = string.Empty;
+
+    public WorkspaceMutationPreview MutationPreview { get; set; } = new();
+}
+
+public sealed class CSharpTextEditApplyRequest : CSharpTextEditRequest
+{
+    public bool AllowGeneratedDocumentChanges { get; set; }
+
+    public bool AllowUnsupportedDocumentChanges { get; set; }
+
+    public bool AllowTruncatedPreview { get; set; }
+}
+
+public sealed class CSharpTextEditApplyResult
+{
+    public bool Applied { get; set; }
+
+    public CSharpTextEditPreview? Preview { get; set; }
+
+    public string ApplyFailure { get; set; } = string.Empty;
+
+    public WorkspaceMutationApplyResult MutationResult { get; set; } = new();
 }

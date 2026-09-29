@@ -19,7 +19,7 @@ public sealed class RefactoringTools
     }
 
     [McpServerTool(Name = "preview_csharp_rename", ReadOnly = true, Idempotent = true)]
-    [Description("Preview Roslyn C# symbol rename changes without applying edits to the workspace or files.")]
+    [Description("Preview Roslyn C# symbol rename changes without applying edits to the workspace or files. Result shape: items[] (typed results), diagnostics[] (string notes), isPartial (bool, true when truncated), succeeded (bool, false only on rejection), errorCode (optional string, from the first diagnostic code prefix).")]
     public Task<WorkspaceQueryResult<RenamePreview>> PreviewCSharpRename(
         [Description("New C# identifier name for the target symbol.")]
         string newName,
@@ -450,6 +450,7 @@ public sealed class RefactoringTools
         {
             Diagnostics = new[] { diagnostic },
             IsPartial = true,
+            Succeeded = false,
         };
     }
 }

@@ -16,13 +16,13 @@ public sealed class CodeNavigationTools
 {
     private const int MaxOpenSolutionBridgeWaitMilliseconds = 90000;
 
-    private static readonly JsonSerializerOptions CacheKeyJsonOptions = new(JsonSerializerDefaults.Web);
-
     private readonly IVisualStudioWorkspaceBridge _workspaceBridge;
     private readonly ShortLivedQueryCache _queryCache;
+    private readonly VersionedWorkspaceQueryCache _versionedQueryCache;
     private readonly IVisualStudioSolutionLauncher _solutionLauncher;
     private readonly IVisualStudioActivityLogReader _activityLogReader;
     private readonly EvidencePacketBuilder _evidencePacketBuilder;
+    private readonly DiagnosticBaselineStore _diagnosticBaselineStore;
     private readonly BridgeCallTelemetryRecorder? _bridgeTelemetryRecorder;
     private const int MaxBuildFailureBindingIssues = 6;
 
@@ -32,13 +32,17 @@ public sealed class CodeNavigationTools
         IVisualStudioSolutionLauncher? solutionLauncher = null,
         IVisualStudioActivityLogReader? activityLogReader = null,
         EvidencePacketBuilder? evidencePacketBuilder = null,
-        BridgeCallTelemetryRecorder? bridgeTelemetryRecorder = null)
+        BridgeCallTelemetryRecorder? bridgeTelemetryRecorder = null,
+        DiagnosticBaselineStore? diagnosticBaselineStore = null,
+        TimeSpan? statusCacheTtl = null)
     {
         _workspaceBridge = workspaceBridge;
         _queryCache = queryCache ?? new ShortLivedQueryCache();
+        _versionedQueryCache = new VersionedWorkspaceQueryCache(workspaceBridge, _queryCache, statusCacheTtl);
         _solutionLauncher = solutionLauncher ?? new VisualStudioSolutionLauncher();
         _activityLogReader = activityLogReader ?? new VisualStudioActivityLogReader();
         _evidencePacketBuilder = evidencePacketBuilder ?? new EvidencePacketBuilder(new EvidenceStore());
+        _diagnosticBaselineStore = diagnosticBaselineStore ?? new DiagnosticBaselineStore();
         _bridgeTelemetryRecorder = bridgeTelemetryRecorder;
     }
 
@@ -105,14 +109,7 @@ public sealed class CodeNavigationTools
         {
             Target = CreateTarget(targetPipeName, targetInstanceId, targetSolutionPath),
         };
-        var cached = await _queryCache.GetOrAddAsync(
-                CreateCacheKey("GetWorkspaceStatus", request),
-                () => _workspaceBridge.GetWorkspaceStatusAsync(request, cancellationToken),
-                cancellationToken)
-            .ConfigureAwait(false);
-        return cached.IsCacheHit
-            ? WithCacheDiagnostic(cached.Value, "get_csharp_workspace_status")
-            : cached.Value;
+        return await _workspaceBridge.GetWorkspaceStatusAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     [Description("Parse C# build output and return ranked build issues, suppressing unrelated path noise and likely cascade errors.")]
@@ -178,6 +175,8 @@ public sealed class CodeNavigationTools
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         [Description("How known noisy diagnostics from generated/vendor/legacy paths are handled: Auto, Penalize, Filter, or Off. Auto filters known noise only when no focused diagnostics scope is provided.")]
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        [Description("Diagnostic coverage: Auto uses Fast for unscoped work and Complete for a focused scope; Fast favors latency and may stop early; Complete attempts all matching projects within the time budget.")]
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         [Description("Whether to query whole-solution diagnostics when no file/project/path scope is available.")]
         bool includeWholeSolutionDiagnostics = false,
         [Description("Whether to read the Visual Studio Output Window Build pane for build triage when buildOutput and buildLogFilePath are omitted.")]
@@ -391,8 +390,11 @@ public sealed class CodeNavigationTools
                 projectName,
                 minimumSeverity,
                 noiseProfile,
+                collectionMode,
                 includeWholeSolutionDiagnostics,
                 maxDiagnostics,
+                0,
+                45000,
                 includeGeneratedCode,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -547,6 +549,8 @@ public sealed class CodeNavigationTools
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         [Description("How known noisy diagnostics from generated/vendor/legacy paths are handled: Auto, Penalize, Filter, or Off.")]
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        [Description("Diagnostic coverage: Auto uses Fast for unscoped work and Complete for focused work; Fast favors latency and may stop early; Complete attempts all matching projects within the time budget.")]
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         [Description("Whether to query whole-solution diagnostics when no file/project/path scope is available.")]
         bool includeWholeSolutionDiagnostics = false,
         [Description("Whether to read the Visual Studio Output Window Build pane for build triage when buildOutput and buildLogFilePath are omitted.")]
@@ -603,6 +607,7 @@ public sealed class CodeNavigationTools
                 projectName,
                 minimumSeverity,
                 noiseProfile,
+                collectionMode,
                 includeWholeSolutionDiagnostics,
                 includeVisualStudioBuildOutput,
                 maxVisualStudioBuildOutputCharacters,
@@ -688,6 +693,8 @@ public sealed class CodeNavigationTools
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         [Description("How known noisy diagnostics from generated/vendor/legacy paths are handled: Auto, Penalize, Filter, or Off. Auto filters known noise only when no focused diagnostics scope is provided.")]
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        [Description("Diagnostic coverage: Auto uses Fast for unscoped work and Complete for focused work; Fast favors latency and may stop early; Complete attempts all matching projects within the time budget.")]
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         [Description("Whether to query whole-solution diagnostics when no file/project/path scope is available.")]
         bool includeWholeSolutionDiagnostics = false,
         [Description("Whether to read the Visual Studio Output Window Build pane for build triage when buildOutput and buildLogFilePath are omitted.")]
@@ -857,8 +864,11 @@ public sealed class CodeNavigationTools
                 projectName,
                 minimumSeverity,
                 noiseProfile,
+                collectionMode,
                 includeWholeSolutionDiagnostics,
                 maxDiagnostics,
+                0,
+                45000,
                 includeGeneratedCode,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -1136,6 +1146,8 @@ public sealed class CodeNavigationTools
                     Target = target,
                     IncludePathPatterns = auditScopes,
                     ExcludePathPatterns = normalizedExcludePatterns,
+                    NoisePathPatterns = WorkspaceWorkflowConfigurationLoader.LoadNoisePathPatterns(
+                        target.SolutionPath),
                     ChangedFiles = normalizedChangedFiles,
                     ProjectName = string.IsNullOrWhiteSpace(projectName) ? null : projectName,
                     MinimumSeverity = minimumSeverity,
@@ -1298,6 +1310,8 @@ public sealed class CodeNavigationTools
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         [Description("How known noisy diagnostics from generated/vendor/legacy paths are handled: Auto, Penalize, Filter, or Off.")]
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        [Description("Diagnostic coverage: Auto uses Fast for unscoped work and Complete for focused work; Fast favors latency and may stop early; Complete attempts all matching projects within the time budget.")]
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         [Description("Maximum build issues to return from build-log triage.")]
         int maxBuildIssues = 20,
         [Description("Maximum Roslyn diagnostics to return.")]
@@ -1485,8 +1499,11 @@ public sealed class CodeNavigationTools
                 projectName,
                 minimumSeverity,
                 noiseProfile,
+                collectionMode,
                 includeWholeSolutionDiagnostics: false,
                 maxDiagnostics,
+                0,
+                45000,
                 includeGeneratedCode,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -1703,6 +1720,8 @@ public sealed class CodeNavigationTools
                         Target = target,
                         IncludePathPatterns = NormalizePatterns(includePathPatterns),
                         ExcludePathPatterns = NormalizePatterns(excludePathPatterns),
+                        NoisePathPatterns = WorkspaceWorkflowConfigurationLoader.LoadNoisePathPatterns(
+                            target.SolutionPath),
                         ChangedFiles = NormalizePatterns(changedFiles),
                         ProjectName = string.IsNullOrWhiteSpace(projectName) ? null : projectName,
                         MinimumSeverity = minimumSeverity,
@@ -1877,38 +1896,16 @@ public sealed class CodeNavigationTools
                 $"Solution search root does not exist or is not a directory: {rootDirectory}");
         }
 
-        var cacheKey = $"PrepareWorkspace|{resolvedRoot}|{preferredName}|{maxDepth}|{maxSolutions}|{includeSlnx}";
-        var cached = await _queryCache.GetOrAddAsync(
-                cacheKey,
-                async () =>
-                {
-                    var localDiagnostics = new List<string>(diagnostics);
-                    var solutionCandidates = FindSolutionCandidates(
-                            resolvedRoot,
-                            preferredName,
-                            maxDepth,
-                            includeSlnx,
-                            maxSolutions,
-                            localDiagnostics,
-                            cancellationToken)
-                        .ToArray();
-                    var instancesResult = await _workspaceBridge.ListVisualStudioInstancesAsync(
-                            new VisualStudioInstancesRequest { IncludeStale = false },
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                    localDiagnostics.AddRange(instancesResult.Diagnostics);
-                    var activeInstances = instancesResult.Items.Where(instance => instance.IsAlive && !instance.IsStale).ToArray();
-                    var report = CreateWorkspacePreparationReport(resolvedRoot, preferredName, solutionCandidates, activeInstances);
-                    return Success(
-                        report,
-                        localDiagnostics,
-                        instancesResult.IsPartial || localDiagnostics.Any(diagnostic => diagnostic.StartsWith("SolutionCandidatesTruncated:", StringComparison.OrdinalIgnoreCase)) || report.IsAmbiguous);
-                },
-                cancellationToken)
+        var solutionCandidates = FindSolutionCandidates(
+            resolvedRoot, preferredName, maxDepth, includeSlnx, maxSolutions, diagnostics, cancellationToken).ToArray();
+        var instancesResult = await _workspaceBridge.ListVisualStudioInstancesAsync(
+                new VisualStudioInstancesRequest { IncludeStale = false }, cancellationToken)
             .ConfigureAwait(false);
-        return cached.IsCacheHit
-            ? WithCacheDiagnostic(cached.Value, "prepare_csharp_workspace")
-            : cached.Value;
+        diagnostics.AddRange(instancesResult.Diagnostics);
+        var activeInstances = instancesResult.Items.Where(instance => instance.IsAlive && !instance.IsStale).ToArray();
+        var report = CreateWorkspacePreparationReport(resolvedRoot, preferredName, solutionCandidates, activeInstances);
+        return Success(report, diagnostics, instancesResult.IsPartial || report.IsAmbiguous
+            || diagnostics.Any(diagnostic => diagnostic.StartsWith("SolutionCandidatesTruncated:", StringComparison.OrdinalIgnoreCase)));
     }
 
     public async Task<WorkspaceQueryResult<VisualStudioSolutionOpenResult>> OpenCSharpSolutionInVisualStudio(
@@ -2110,9 +2107,9 @@ public sealed class CodeNavigationTools
             IncludeGeneratedCode = includeGeneratedCode,
         };
 
-        var cached = await _queryCache.GetOrAddAsync(
-                CreateCacheKey("SearchSymbols", request),
-                () => _workspaceBridge.SearchSymbolsAsync(request, cancellationToken),
+        var cached = await _versionedQueryCache.QueryAsync(
+                "SearchSymbols", request,
+                token => _workspaceBridge.SearchSymbolsAsync(request, token),
                 cancellationToken)
             .ConfigureAwait(false);
         return cached.IsCacheHit
@@ -2317,7 +2314,7 @@ public sealed class CodeNavigationTools
             filePath,
             line,
             column,
-            maxResults: 1000,
+            maxResults,
             includeGeneratedCode,
             CreateTarget(targetPipeName, targetInstanceId, targetSolutionPath));
 
@@ -2597,9 +2594,9 @@ public sealed class CodeNavigationTools
                 maxSnippets: 1,
                 includeGeneratedCode,
                 CreateTarget(targetPipeName, targetInstanceId, targetSolutionPath));
-        var cached = await _queryCache.GetOrAddAsync(
-                CreateCacheKey("GetSourceContext", request),
-                () => _workspaceBridge.GetSourceContextAsync(request, cancellationToken),
+        var cached = await _versionedQueryCache.QueryAsync(
+                "GetSourceContext", request,
+                token => _workspaceBridge.GetSourceContextAsync(request, token),
                 cancellationToken)
             .ConfigureAwait(false);
         return cached.IsCacheHit
@@ -2637,28 +2634,28 @@ public sealed class CodeNavigationTools
         var isPartial = false;
         var target = CreateTarget(targetPipeName, targetInstanceId, targetSolutionPath);
 
-        foreach (var position in positions.Take(maxPositions))
+        var batchRequest = new BatchSourceContextRequest
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var result = await _workspaceBridge.GetSourceContextAsync(
-                    CreateSourceContextRequest(
-                        symbolKey: null,
-                        position.FilePath,
-                        position.Line,
-                        position.Column,
-                        contextLines,
-                        maxCharsPerPosition,
-                        maxSnippets: 1,
-                        includeGeneratedCode,
-                        target),
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            snippets.AddRange(result.Items);
-            diagnostics.AddRange(result.Diagnostics.Select(diagnostic =>
-                $"SourceContext[{position.FilePath}:{position.Line}:{position.Column}]: {diagnostic}"));
-            isPartial |= result.IsPartial;
+            Target = target,
+            Positions = positions.Take(maxPositions).ToArray(),
+            ContextLines = contextLines,
+            MaxCharsPerPosition = maxCharsPerPosition,
+            IncludeGeneratedCode = includeGeneratedCode,
+        };
+        var cachedBatch = await _versionedQueryCache.QueryAsync(
+                "BatchGetSourceContexts",
+                batchRequest,
+                token => _workspaceBridge.GetSourceContextsAsync(batchRequest, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+        var batchResult = cachedBatch.Value;
+        if (cachedBatch.IsCacheHit)
+        {
+            batchResult = WithCacheDiagnostic(batchResult, "batch_get_csharp_source_contexts");
         }
+        snippets.AddRange(batchResult.Items);
+        diagnostics.AddRange(batchResult.Diagnostics);
+        isPartial |= batchResult.IsPartial;
 
         if (positions.Length > maxPositions)
         {
@@ -2726,6 +2723,8 @@ public sealed class CodeNavigationTools
         CodeDiagnosticSeverity? minimumSeverity = null,
         [Description("How known noisy diagnostics from generated/vendor/legacy paths are handled: Auto, Penalize, Filter, or Off. Auto filters known noise only when no focused diagnostics scope is provided.")]
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        [Description("Diagnostic coverage: Auto uses Fast for unscoped work and Complete for a focused scope; Fast favors latency and may stop early; Complete attempts all matching projects within the time budget.")]
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         [Description("Maximum number of diagnostics to return.")]
         int maxResults = 500,
         [Description("Maximum number of C# projects to process before returning a partial result. Use 0 for no project-count cap.")]
@@ -2757,29 +2756,203 @@ public sealed class CodeNavigationTools
             return Failure<CodeDiagnostic>("MaxElapsedMilliseconds must be between 1000 and 55000.");
         }
 
-        var request = new DiagnosticsRequest
-        {
-                Target = CreateTarget(targetPipeName, targetInstanceId, targetSolutionPath),
-                FilePath = string.IsNullOrWhiteSpace(filePath) ? null : filePath,
-                IncludePathPatterns = NormalizePatterns(includePathPatterns),
-                ExcludePathPatterns = NormalizePatterns(excludePathPatterns),
-                ChangedFiles = NormalizePatterns(changedFiles),
-                ProjectName = string.IsNullOrWhiteSpace(projectName) ? null : projectName,
-                MinimumSeverity = minimumSeverity,
-                NoiseProfile = noiseProfile,
-                MaxResults = maxResults,
-                MaxProjects = maxProjects,
-                MaxElapsedMilliseconds = maxElapsedMilliseconds,
-            IncludeGeneratedCode = includeGeneratedCode,
-        };
-        var cached = await _queryCache.GetOrAddAsync(
-                CreateCacheKey("GetDiagnostics", request),
-                () => _workspaceBridge.GetDiagnosticsAsync(request, cancellationToken),
+        var request = CreateDiagnosticsRequest(
+            filePath,
+            includePathPatterns,
+            excludePathPatterns,
+            changedFiles,
+            projectName,
+            minimumSeverity,
+            noiseProfile, collectionMode,
+            maxResults,
+            maxProjects,
+            maxElapsedMilliseconds,
+            includeGeneratedCode,
+            targetPipeName,
+            targetInstanceId,
+            targetSolutionPath);
+        var cached = await _versionedQueryCache.QueryAsync(
+                "GetDiagnostics", request,
+                token => _workspaceBridge.GetDiagnosticsAsync(request, token),
                 cancellationToken)
             .ConfigureAwait(false);
         return cached.IsCacheHit
             ? WithCacheDiagnostic(cached.Value, "get_csharp_diagnostics")
             : cached.Value;
+    }
+
+    [McpServerTool(Name = "capture_csharp_diagnostic_baseline", ReadOnly = true, Idempotent = true)]
+    [Description("Capture a bounded Roslyn diagnostic baseline for a specific scope. The baseline is local, expires after 30 minutes, and cannot be used with a different scope.")]
+    public async Task<WorkspaceQueryResult<DiagnosticBaselineCapture>> CaptureCSharpDiagnosticBaseline(
+        string? filePath = null,
+        string[]? includePathPatterns = null,
+        string[]? excludePathPatterns = null,
+        string[]? changedFiles = null,
+        string? projectName = null,
+        CodeDiagnosticSeverity? minimumSeverity = null,
+        CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
+        int maxResults = 500,
+        int maxProjects = 0,
+        int maxElapsedMilliseconds = 45000,
+        bool includeGeneratedCode = false,
+        string? targetPipeName = null,
+        string? targetInstanceId = null,
+        string? targetSolutionPath = null,
+        CancellationToken cancellationToken = default)
+    {
+        var request = CreateDiagnosticsRequest(
+            filePath, includePathPatterns, excludePathPatterns, changedFiles, projectName,
+            minimumSeverity, noiseProfile, collectionMode, maxResults, maxProjects, maxElapsedMilliseconds,
+            includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath);
+        var validation = ValidateDiagnosticsRequest(request);
+        if (validation is not null)
+        {
+            return Failure<DiagnosticBaselineCapture>(validation);
+        }
+
+        var statusResult = await _workspaceBridge.GetWorkspaceStatusAsync(
+                new WorkspaceStatusRequest { Target = request.Target, SnapshotOnly = true },
+                cancellationToken)
+            .ConfigureAwait(false);
+        var status = statusResult.Items.FirstOrDefault();
+        if (status is null || !status.IsSolutionLoaded || string.IsNullOrWhiteSpace(status.WorkspaceVersion))
+        {
+            return Failure<DiagnosticBaselineCapture>(
+                "DiagnosticBaselineUnavailable: an active workspace with a snapshot identity is required.");
+        }
+
+        request.NoisePathPatterns = WorkspaceWorkflowConfigurationLoader.LoadNoisePathPatterns(
+            status.SolutionPath);
+        request.Target = new VisualStudioBridgeTarget
+        {
+            InstanceId = status.InstanceId,
+            PipeName = request.Target?.PipeName ?? string.Empty,
+            SolutionPath = status.SolutionPath,
+        };
+        var result = await _versionedQueryCache.QueryAsync(
+                "CaptureDiagnosticsBaseline", request,
+                token => _workspaceBridge.GetDiagnosticsAsync(request, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (result.Value.IsPartial)
+        {
+            return new WorkspaceQueryResult<DiagnosticBaselineCapture>
+            {
+                Diagnostics = result.Value.Diagnostics.Concat(new[]
+                {
+                    "DiagnosticBaselineNotCaptured: diagnostics were partial; narrow the scope or increase the time budget.",
+                }).ToArray(),
+                IsPartial = true,
+            };
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var capture = _diagnosticBaselineStore.Add(
+            status.WorkspaceVersion,
+            request,
+            result.Value.Items,
+            now);
+        return new WorkspaceQueryResult<DiagnosticBaselineCapture>
+        {
+            Items = new[] { capture },
+            Diagnostics = statusResult.Diagnostics.Concat(result.Value.Diagnostics).ToArray(),
+            IsPartial = false,
+        };
+    }
+
+    [McpServerTool(Name = "compare_csharp_diagnostics_to_baseline", ReadOnly = true, Idempotent = true)]
+    [Description("Compare scoped Roslyn diagnostics with a previously captured baseline. New versus pre-existing is reported only when scope matches and the current query is complete.")]
+    public async Task<WorkspaceQueryResult<DiagnosticBaselineComparison>> CompareCSharpDiagnosticsToBaseline(
+        string baselineId,
+        string? filePath = null,
+        string[]? includePathPatterns = null,
+        string[]? excludePathPatterns = null,
+        string[]? changedFiles = null,
+        string? projectName = null,
+        CodeDiagnosticSeverity? minimumSeverity = null,
+        CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
+        int maxResults = 500,
+        int maxProjects = 0,
+        int maxElapsedMilliseconds = 45000,
+        bool includeGeneratedCode = false,
+        string? targetPipeName = null,
+        string? targetInstanceId = null,
+        string? targetSolutionPath = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(baselineId))
+        {
+            return Failure<DiagnosticBaselineComparison>("BaselineId is required.");
+        }
+
+        if (!_diagnosticBaselineStore.TryGet(
+                baselineId.Trim(),
+                DateTimeOffset.UtcNow,
+                out var baseline,
+                out var baselineFailure))
+        {
+            return Failure<DiagnosticBaselineComparison>(baselineFailure);
+        }
+
+        var request = CreateDiagnosticsRequest(
+            filePath, includePathPatterns, excludePathPatterns, changedFiles, projectName,
+            minimumSeverity, noiseProfile, collectionMode, maxResults, maxProjects, maxElapsedMilliseconds,
+            includeGeneratedCode, targetPipeName, targetInstanceId, targetSolutionPath);
+        var validation = ValidateDiagnosticsRequest(request);
+        if (validation is not null)
+        {
+            return Failure<DiagnosticBaselineComparison>(validation);
+        }
+
+        var statusResult = await _workspaceBridge.GetWorkspaceStatusAsync(
+                new WorkspaceStatusRequest { Target = request.Target, SnapshotOnly = true },
+                cancellationToken)
+            .ConfigureAwait(false);
+        var status = statusResult.Items.FirstOrDefault();
+        if (status is null || !status.IsSolutionLoaded || string.IsNullOrWhiteSpace(status.WorkspaceVersion))
+        {
+            return Failure<DiagnosticBaselineComparison>(
+                "DiagnosticBaselineUnavailable: the current workspace snapshot could not be verified.");
+        }
+
+        request.NoisePathPatterns = WorkspaceWorkflowConfigurationLoader.LoadNoisePathPatterns(
+            status.SolutionPath);
+        var scopeMatched = string.Equals(
+            baseline!.ScopeFingerprint,
+            DiagnosticBaselineStore.CreateScopeFingerprint(request),
+            StringComparison.Ordinal);
+        if (!scopeMatched)
+        {
+            return Failure<DiagnosticBaselineComparison>(
+                "DiagnosticBaselineScopeMismatch: capture and comparison must use identical diagnostic scope and filtering configuration.");
+        }
+
+        request.Target = new VisualStudioBridgeTarget
+        {
+            InstanceId = status.InstanceId,
+            PipeName = request.Target?.PipeName ?? string.Empty,
+            SolutionPath = status.SolutionPath,
+        };
+        var current = await _versionedQueryCache.QueryAsync(
+                "CompareDiagnosticsBaseline", request,
+                token => _workspaceBridge.GetDiagnosticsAsync(request, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+        var comparison = CompareDiagnosticSets(baseline, current.Value.Items, status.WorkspaceVersion, scopeMatched, current.Value.IsPartial);
+        var diagnostics = statusResult.Diagnostics.Concat(current.Value.Diagnostics).ToList();
+        if (current.Value.IsPartial)
+        {
+            diagnostics.Add("DiagnosticBaselineComparisonUnknown: current diagnostics are partial; no introduced/pre-existing classification is asserted.");
+        }
+
+        return new WorkspaceQueryResult<DiagnosticBaselineComparison>
+        {
+            Items = new[] { comparison },
+            Diagnostics = diagnostics,
+            IsPartial = current.Value.IsPartial,
+        };
     }
 
     [Description("Return the current Visual Studio Error List items through EnvDTE. This is VS UI context, not a replacement for build output or Roslyn diagnostics.")]
@@ -3381,9 +3554,9 @@ public sealed class CodeNavigationTools
             IncludeMetadataReferences = includeMetadataReferences,
         };
 
-        var cached = await _queryCache.GetOrAddAsync(
-                CreateCacheKey("GetProjectGraph", request),
-                () => _workspaceBridge.GetProjectGraphAsync(request, cancellationToken),
+        var cached = await _versionedQueryCache.QueryAsync(
+                "GetProjectGraph", request,
+                token => _workspaceBridge.GetProjectGraphAsync(request, token),
                 cancellationToken)
             .ConfigureAwait(false);
         return cached.IsCacheHit
@@ -5194,7 +5367,7 @@ public sealed class CodeNavigationTools
             var regex = IsRootedPathPattern(normalizedPattern)
                 ? "^" + escapedPattern + "$"
                 : "(^|.*/)" + escapedPattern + "$";
-            return Regex.IsMatch(normalizedPath, regex, RegexOptions.IgnoreCase);
+            return Regex.IsMatch(normalizedPath, regex, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
         if (normalizedPath.Equals(normalizedPattern, StringComparison.OrdinalIgnoreCase))
@@ -5316,11 +5489,7 @@ public sealed class CodeNavigationTools
                     ProjectName = issue.ProjectName,
                     Span = issue.Span,
                     IsLikelyCascade = issue.IsLikelyCascade,
-                    BaselineKind = issue.IsLikelyCascade
-                        ? DiagnosticBaselineKind.Cascade
-                        : issue.IsInChangedFile
-                            ? DiagnosticBaselineKind.IntroducedByCurrentChange
-                            : DiagnosticBaselineKind.PreExisting,
+                    BaselineKind = DiagnosticBaselineKind.Unknown,
                     RelevanceScore = issue.RootCauseScore > 0
                         ? issue.RootCauseScore
                         : issue.IsLikelyCascade ? 35 : issue.IsInChangedFile ? 110 : 90,
@@ -5343,7 +5512,7 @@ public sealed class CodeNavigationTools
                 ProjectName = diagnostic.ProjectName,
                 Span = diagnostic.Span,
                 IsBackgroundNoise = isNoise,
-                BaselineKind = ClassifyDiagnosticBaseline(diagnostic, isNoise),
+                BaselineKind = DiagnosticBaselineKind.Unknown,
                 RelevanceScore = diagnostic.RelevanceScore + (diagnostic.Severity == CodeDiagnosticSeverity.Error ? 25 : 0) - (isNoise ? 50 : 0),
                 EvidenceLevel = isNoise ? WorkflowEvidenceLevel.Background : WorkflowEvidenceLevel.Fact,
                 Reasons = diagnostic.ScopeReasons.Length == 0 ? new[] { "Roslyn diagnostic" } : diagnostic.ScopeReasons,
@@ -5356,21 +5525,6 @@ public sealed class CodeNavigationTools
             .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
             .Take(20)
             .ToArray();
-    }
-
-    private static DiagnosticBaselineKind ClassifyDiagnosticBaseline(CodeDiagnostic diagnostic, bool isNoise)
-    {
-        if (isNoise)
-        {
-            return DiagnosticBaselineKind.UnrelatedNoise;
-        }
-
-        if (diagnostic.ScopeReasons.Any(reason => reason.Contains("changed file", StringComparison.OrdinalIgnoreCase)))
-        {
-            return DiagnosticBaselineKind.IntroducedByCurrentChange;
-        }
-
-        return DiagnosticBaselineKind.PreExisting;
     }
 
     private static RecommendedNextAction[] CreateInvestigationRecommendedNextActions(
@@ -7143,8 +7297,11 @@ public sealed class CodeNavigationTools
         string? projectName,
         CodeDiagnosticSeverity? minimumSeverity,
         CodeDiagnosticNoiseProfile noiseProfile,
+        CodeDiagnosticCollectionMode collectionMode,
         bool includeWholeSolutionDiagnostics,
         int maxDiagnostics,
+        int maxProjects,
+        int maxElapsedMilliseconds,
         bool includeGeneratedCode,
         CancellationToken cancellationToken)
     {
@@ -7166,22 +7323,38 @@ public sealed class CodeNavigationTools
             };
         }
 
-        return await _workspaceBridge.GetDiagnosticsAsync(
-                new DiagnosticsRequest
-                {
-                    Target = target,
-                    FilePath = string.IsNullOrWhiteSpace(filePath) ? null : filePath,
-                    IncludePathPatterns = includePathPatterns,
-                    ExcludePathPatterns = NormalizePatterns(excludePathPatterns),
-                    ChangedFiles = NormalizePatterns(changedFiles),
-                    ProjectName = string.IsNullOrWhiteSpace(projectName) ? null : projectName,
-                    MinimumSeverity = minimumSeverity,
-                    NoiseProfile = noiseProfile,
-                    MaxResults = maxDiagnostics,
-                    IncludeGeneratedCode = includeGeneratedCode,
-                },
+        var diagnosticsRequest = new DiagnosticsRequest
+        {
+            Target = target,
+            FilePath = string.IsNullOrWhiteSpace(filePath) ? null : filePath,
+            IncludePathPatterns = includePathPatterns,
+            ExcludePathPatterns = NormalizePatterns(excludePathPatterns),
+            ChangedFiles = NormalizePatterns(changedFiles),
+            ProjectName = string.IsNullOrWhiteSpace(projectName) ? null : projectName,
+            MinimumSeverity = minimumSeverity,
+            NoiseProfile = noiseProfile,
+            CollectionMode = collectionMode,
+            MaxProjects = maxProjects,
+            MaxElapsedMilliseconds = maxElapsedMilliseconds,
+            MaxResults = maxDiagnostics,
+            IncludeGeneratedCode = includeGeneratedCode,
+        };
+        diagnosticsRequest.NoisePathPatterns = WorkspaceWorkflowConfigurationLoader.LoadNoisePathPatterns(
+            target.SolutionPath);
+
+        // Route through the versioned cache with the SAME operation name and
+        // request shape as the direct get_csharp_diagnostics tool: investigation,
+        // build-failure, review, and verification workflows build near-identical
+        // requests for the same scope, so a sequence of workflow calls reuses one
+        // analyzer run within the cache TTL instead of paying ~0.5s each.
+        var cached = await _versionedQueryCache.QueryAsync(
+                "GetDiagnostics", diagnosticsRequest,
+                token => _workspaceBridge.GetDiagnosticsAsync(diagnosticsRequest, token),
                 cancellationToken)
             .ConfigureAwait(false);
+        return cached.IsCacheHit
+            ? WithCacheDiagnostic(cached.Value, "workflow-diagnostics")
+            : cached.Value;
     }
 
     private async Task<SymbolDescriptor[]> QueryDefinitionsAsync(
@@ -8674,6 +8847,7 @@ public sealed class CodeNavigationTools
         string? projectName = null,
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         bool includeVisualStudioBuildOutput = true,
         int maxVisualStudioBuildOutputCharacters = 20000,
         int maxBuildIssues = 20,
@@ -8706,6 +8880,7 @@ public sealed class CodeNavigationTools
                 projectName,
                 minimumSeverity,
                 noiseProfile,
+                collectionMode,
                 includeWholeSolutionDiagnostics: false,
                 includeVisualStudioBuildOutput,
                 maxVisualStudioBuildOutputCharacters,
@@ -9524,6 +9699,7 @@ public sealed class CodeNavigationTools
         string? projectName = null,
         CodeDiagnosticSeverity? minimumSeverity = CodeDiagnosticSeverity.Warning,
         CodeDiagnosticNoiseProfile noiseProfile = CodeDiagnosticNoiseProfile.Auto,
+        CodeDiagnosticCollectionMode collectionMode = CodeDiagnosticCollectionMode.Auto,
         bool includeVisualStudioBuildOutput = true,
         int maxVisualStudioBuildOutputCharacters = 20000,
         int maxBuildIssues = 20,
@@ -9548,6 +9724,7 @@ public sealed class CodeNavigationTools
                 projectName,
                 minimumSeverity,
                 noiseProfile,
+                collectionMode,
                 includeWholeSolutionDiagnostics: false,
                 includeVisualStudioBuildOutput,
                 maxVisualStudioBuildOutputCharacters,
@@ -9575,6 +9752,7 @@ public sealed class CodeNavigationTools
                 excludePathPatterns,
                 minimumSeverity,
                 noiseProfile,
+                collectionMode,
                 maxBuildIssues,
                 maxDiagnostics,
                 maxSymbols: 20,
@@ -9838,7 +10016,7 @@ public sealed class CodeNavigationTools
         var testProjects = projects.Where(IsLikelyTestProjectPath).ToArray();
         var buildCommands = CreateRepoWorkflowBuildCommands(selectedSolution, projects);
         var testCommands = CreateRepoWorkflowTestCommands(testProjects, selectedSolution);
-        var noisyPaths = CreateDefaultNoisyPathPatterns();
+        var noisyPaths = CreateDefaultNoisyPathPatterns(root.FullName, diagnostics);
 
         return Task.FromResult(Success(
             new CSharpRepoWorkflowAnalysis
@@ -10182,18 +10360,24 @@ public sealed class CodeNavigationTools
     public async Task<WorkspaceQueryResult<CSharpWorkflowPerformanceSnapshot>> GetCSharpWorkflowPerformanceSnapshot(
         string? solutionPath = null,
         string? benchmarkProfile = null,
-        int expectedToolCount = 83,
+        int expectedToolCount = 0,
         string? targetPipeName = null,
         string? targetInstanceId = null,
         string? targetSolutionPath = null,
         CancellationToken cancellationToken = default)
     {
-        if (expectedToolCount is < 1 or > 500)
+        if (expectedToolCount is < 0 or > 500)
         {
-            return Failure<CSharpWorkflowPerformanceSnapshot>("ExpectedToolCount must be between 1 and 500.");
+            return Failure<CSharpWorkflowPerformanceSnapshot>("ExpectedToolCount must be between 0 and 500; 0 uses actual registration.");
         }
 
         var diagnostics = new List<string>();
+        var actualToolCount = WorkflowCapabilityTools.RegisteredToolCount;
+        if (expectedToolCount > 0 && expectedToolCount != actualToolCount)
+        {
+            diagnostics.Add($"ToolCountExpectationMismatch: expected={expectedToolCount}; actual={actualToolCount}");
+        }
+
         var cacheStatistics = _queryCache.GetStatistics();
         var bridgeTelemetry = _bridgeTelemetryRecorder?.GetSummary() ?? default;
         var instancesResult = await ListVisualStudioInstances(includeStale: true, cancellationToken)
@@ -10219,11 +10403,23 @@ public sealed class CodeNavigationTools
                 TargetSolutionPath = resolvedSolution,
                 ActiveInstanceCount = activeInstances.Length,
                 StaleInstanceCount = staleInstances.Length,
-                ToolCount = expectedToolCount,
-                ExpectedToolCount = expectedToolCount,
+                ToolCount = actualToolCount,
+                ExpectedToolCount = expectedToolCount == 0 ? actualToolCount : expectedToolCount,
                 ActiveInstanceIds = activeInstances.Select(instance => instance.InstanceId).Where(id => !string.IsNullOrWhiteSpace(id)).Take(8).ToArray(),
                 StaleInstanceIds = staleInstances.Select(instance => instance.InstanceId).Where(id => !string.IsNullOrWhiteSpace(id)).Take(8).ToArray(),
                 RecommendedProfiles = new[] { "tool-schema", "workflow", "large", "agentic-resources" },
+                Capabilities = new[]
+                {
+                    "discovery:local+task-filtered",
+                    "operations:cancellation+bounded-outcome-query",
+                    "workspace-preparation:sln+slnx",
+                    "task-entry:edit+review+verification+runtime-exception",
+                    "source-context:single+batch+snapshot-cache",
+                    "diagnostics:scoped+baseline-comparison+repository-noise-config",
+                    "mutation:preview-apply-safety-gates",
+                    "debug:explicit-control+scenario-plan",
+                    "evidence:resource-links+bounded-range-read",
+                },
                 SuggestedEnvironmentVariables = CreateWorkflowBenchmarkEnvironmentVariables(profile, resolvedSolution, activeInstances.FirstOrDefault()?.InstanceId),
                 BudgetHints = CreateWorkflowPerformanceBudgetHints(),
                 TelemetrySignals = CreateWorkflowTelemetrySignals(),
@@ -10506,9 +10702,9 @@ public sealed class CodeNavigationTools
         return "\"" + path.Replace("\"", "`\"", StringComparison.Ordinal) + "\"";
     }
 
-    private static string[] CreateDefaultNoisyPathPatterns()
+    private static string[] CreateDefaultNoisyPathPatterns(string rootDirectory, ICollection<string> diagnostics)
     {
-        return new[]
+        var defaults = new[]
         {
             "**/bin/**",
             "**/obj/**",
@@ -10516,9 +10712,14 @@ public sealed class CodeNavigationTools
             "**/packages/**",
             "**/generated/**",
             "**/vendor/**",
-            "**/ACADPlugins/**",
-            "**/TZData_src/**",
         };
+        var solutionPath = Directory.EnumerateFiles(rootDirectory, "*.sln", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(rootDirectory, "*.slnx", SearchOption.TopDirectoryOnly))
+            .FirstOrDefault();
+        return defaults
+            .Concat(WorkspaceWorkflowConfigurationLoader.LoadNoisePathPatterns(solutionPath, diagnostics))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string[] CreateDefaultAgentToolRoutingRules()
@@ -10967,6 +11168,154 @@ public sealed class CodeNavigationTools
         return excludePathPatterns.Any(pattern => MatchesPathPattern(filePath, pattern));
     }
 
+    private static DiagnosticsRequest CreateDiagnosticsRequest(
+        string? filePath,
+        string[]? includePathPatterns,
+        string[]? excludePathPatterns,
+        string[]? changedFiles,
+        string? projectName,
+        CodeDiagnosticSeverity? minimumSeverity,
+        CodeDiagnosticNoiseProfile noiseProfile,
+        CodeDiagnosticCollectionMode collectionMode,
+        int maxResults,
+        int maxProjects,
+        int maxElapsedMilliseconds,
+        bool includeGeneratedCode,
+        string? targetPipeName,
+        string? targetInstanceId,
+        string? targetSolutionPath)
+    {
+        var request = new DiagnosticsRequest
+        {
+            Target = CreateTarget(targetPipeName, targetInstanceId, targetSolutionPath),
+            FilePath = string.IsNullOrWhiteSpace(filePath) ? null : filePath,
+            IncludePathPatterns = NormalizePatterns(includePathPatterns),
+            ExcludePathPatterns = NormalizePatterns(excludePathPatterns),
+            ChangedFiles = NormalizePatterns(changedFiles),
+            ProjectName = string.IsNullOrWhiteSpace(projectName) ? null : projectName,
+            MinimumSeverity = minimumSeverity,
+            NoiseProfile = noiseProfile,
+            CollectionMode = collectionMode,
+            MaxResults = maxResults,
+            MaxProjects = maxProjects,
+            MaxElapsedMilliseconds = maxElapsedMilliseconds,
+            IncludeGeneratedCode = includeGeneratedCode,
+        };
+        request.NoisePathPatterns = WorkspaceWorkflowConfigurationLoader.LoadNoisePathPatterns(
+            request.Target?.SolutionPath);
+        return request;
+    }
+
+    private static string? ValidateDiagnosticsRequest(DiagnosticsRequest request)
+    {
+        if (request.MaxResults is < 1 or > 5000)
+        {
+            return "MaxResults must be between 1 and 5000.";
+        }
+
+        if (request.MaxProjects is < 0 or > 1000)
+        {
+            return "MaxProjects must be between 0 and 1000.";
+        }
+
+        if (request.MaxElapsedMilliseconds is < 1000 or > 55000)
+        {
+            return "MaxElapsedMilliseconds must be between 1000 and 55000.";
+        }
+
+        if (!Enum.IsDefined(request.CollectionMode))
+        {
+            return "CollectionMode must be Auto, Fast, or Complete.";
+        }
+
+        return null;
+    }
+
+    private static DiagnosticBaselineComparison CompareDiagnosticSets(
+        DiagnosticBaselineStore.Entry baseline,
+        IReadOnlyList<CodeDiagnostic> current,
+        string currentWorkspaceVersion,
+        bool scopeMatched,
+        bool isPartial)
+    {
+        var baselineCounts = CountDiagnostics(baseline.Diagnostics);
+        var currentCounts = CountDiagnostics(current);
+        var introduced = new List<CodeDiagnostic>();
+        var preExisting = new List<CodeDiagnostic>();
+        var unknown = new List<CodeDiagnostic>();
+        foreach (var diagnostic in current)
+        {
+            var key = CreateDiagnosticComparisonKey(diagnostic);
+            if (isPartial)
+            {
+                unknown.Add(diagnostic);
+                continue;
+            }
+
+            var remainingBaseline = baselineCounts.TryGetValue(key, out var count) ? count : 0;
+            if (remainingBaseline > 0)
+            {
+                baselineCounts[key] = remainingBaseline - 1;
+                preExisting.Add(diagnostic);
+            }
+            else
+            {
+                introduced.Add(diagnostic);
+            }
+        }
+
+        var removed = isPartial
+            ? Array.Empty<string>()
+            : baselineCounts
+                .Where(pair => pair.Value > 0)
+                .Select(pair => pair.Key)
+                .OrderBy(key => key, StringComparer.Ordinal)
+                .ToArray();
+
+        return new DiagnosticBaselineComparison
+        {
+            BaselineId = baseline.BaselineId,
+            Status = isPartial ? "UnknownCurrentDiagnostics" : "Compared",
+            ScopeMatched = scopeMatched,
+            SnapshotChanged = !string.Equals(
+                baseline.WorkspaceVersion,
+                currentWorkspaceVersion,
+                StringComparison.Ordinal),
+            BaselineWorkspaceVersion = baseline.WorkspaceVersion,
+            CurrentWorkspaceVersion = currentWorkspaceVersion,
+            BaselineCapturedUtc = baseline.CapturedUtc,
+            BaselineExpiresUtc = baseline.ExpiresUtc,
+            IntroducedDiagnostics = introduced.ToArray(),
+            PreExistingDiagnostics = preExisting.ToArray(),
+            UnknownDiagnostics = unknown.ToArray(),
+            RemovedDiagnosticKeys = removed,
+        };
+    }
+
+    private static Dictionary<string, int> CountDiagnostics(IEnumerable<CodeDiagnostic> diagnostics)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var diagnostic in diagnostics)
+        {
+            var key = CreateDiagnosticComparisonKey(diagnostic);
+            counts[key] = counts.TryGetValue(key, out var count) ? count + 1 : 1;
+        }
+
+        return counts;
+    }
+
+    private static string CreateDiagnosticComparisonKey(CodeDiagnostic diagnostic)
+    {
+        var path = diagnostic.Span?.FilePath?.Trim().Replace('\\', '/') ?? string.Empty;
+        return string.Join(
+            "|",
+            diagnostic.Id,
+            diagnostic.Severity,
+            diagnostic.ProjectName,
+            diagnostic.Message,
+            path);
+    }
+
     private static ArtifactEvidenceItem? ReadArtifactEvidence(
         string filePath,
         string[] includeTextPatterns,
@@ -11037,6 +11386,7 @@ public sealed class CodeNavigationTools
             Items = Array.Empty<T>(),
             Diagnostics = new[] { diagnostic },
             IsPartial = true,
+            Succeeded = false,
         };
     }
 
@@ -11051,11 +11401,6 @@ public sealed class CodeNavigationTools
             Diagnostics = diagnostics.ToArray(),
             IsPartial = isPartial,
         };
-    }
-
-    private static string CreateCacheKey<TRequest>(string operationName, TRequest request)
-    {
-        return operationName + ":" + JsonSerializer.Serialize(request, CacheKeyJsonOptions);
     }
 
     private static WorkspaceQueryResult<T> WithCacheDiagnostic<T>(

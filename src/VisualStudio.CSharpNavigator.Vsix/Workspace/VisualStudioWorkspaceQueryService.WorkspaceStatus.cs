@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.VisualStudio.Shell;
 using VisualStudio.CSharpNavigator.Protocol;
+using VisualStudio.CSharpNavigator.Roslyn;
 
 namespace VisualStudio.CSharpNavigator.Vsix.Workspace;
 
@@ -16,7 +17,8 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         string instanceId,
         int processId,
         List<string> diagnostics,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool snapshotOnly = false)
     {
         var status = new WorkspaceStatus
         {
@@ -32,6 +34,7 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         }
 
         var solution = workspaceResult.Workspace.CurrentSolution;
+        status.WorkspaceVersion = WorkspaceSnapshotIdentity.GetVersion(solution);
         status.SolutionPath = solution.FilePath ?? string.Empty;
         status.SolutionName = string.IsNullOrWhiteSpace(solution.FilePath)
             ? string.Empty
@@ -39,6 +42,10 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         status.ProjectCount = solution.Projects.Count();
         status.DocumentCount = solution.Projects.Sum(project => project.DocumentIds.Count);
         status.IsSolutionLoaded = !string.IsNullOrWhiteSpace(solution.FilePath) || status.ProjectCount > 0;
+        if (snapshotOnly)
+        {
+            return status;
+        }
         await PopulateVisualStudioStatusAsync(status, diagnostics, cancellationToken).ConfigureAwait(false);
         PopulateProjectStatus(status, solution, diagnostics);
 

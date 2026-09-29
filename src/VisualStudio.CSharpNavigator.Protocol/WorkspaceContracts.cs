@@ -6,10 +6,14 @@ namespace VisualStudio.CSharpNavigator.Protocol;
 public sealed class WorkspaceStatusRequest : IVisualStudioBridgeTargetedRequest
 {
     public VisualStudioBridgeTarget? Target { get; set; }
+
+    public bool SnapshotOnly { get; set; }
 }
 
 public sealed class WorkspaceStatus
 {
+    public string WorkspaceVersion { get; set; } = string.Empty;
+
     public string InstanceId { get; set; } = string.Empty;
 
     public int ProcessId { get; set; }
@@ -212,4 +216,67 @@ public sealed class VisualStudioBridgeInstance
     public string ExtensionFileVersion { get; set; } = string.Empty;
 
     public DateTimeOffset LastSeenUtc { get; set; }
+}
+
+// VS-side build orchestration: start (fire-and-forget) + poll (read status).
+// The 60s bridge timeout requires this split; heavy builds exceed it.
+public sealed class VisualStudioBuildRequest : IVisualStudioBridgeTargetedRequest
+{
+    public VisualStudioBridgeTarget? Target { get; set; }
+
+    public string ProjectName { get; set; } = string.Empty;
+
+    public bool Rebuild { get; set; }
+}
+
+public sealed class VisualStudioBuildResult
+{
+    public bool BuildSubmitted { get; set; }
+}
+
+public sealed class VisualStudioBuildStatusRequest : IVisualStudioBridgeTargetedRequest
+{
+    public VisualStudioBridgeTarget? Target { get; set; }
+}
+
+public sealed class VisualStudioBuildStatus
+{
+    public string BuildState { get; set; } = string.Empty;
+
+    public bool IsBuildInProgress { get; set; }
+
+    public int LastBuildErrorCount { get; set; }
+
+    public int LastBuildWarningCount { get; set; }
+
+    public string StartupProjectName { get; set; } = string.Empty;
+
+    public string ActiveConfigurationName { get; set; } = string.Empty;
+}
+
+// VS activity journal: bounded ring buffer of recent Build/Debug/Solution/Document
+// events observed inside Visual Studio, readable by AI agents.
+public sealed class VisualStudioActivityRequest : IVisualStudioBridgeTargetedRequest
+{
+    public VisualStudioBridgeTarget? Target { get; set; }
+
+    public int MaxEvents { get; set; } = 50;
+
+    public string? Category { get; set; }
+}
+
+public sealed class VisualStudioActivityEvent
+{
+    public DateTimeOffset TimestampUtc { get; set; }
+
+    public string Category { get; set; } = string.Empty;
+
+    public string Kind { get; set; } = string.Empty;
+
+    public string Summary { get; set; } = string.Empty;
+}
+
+public sealed class VisualStudioActivityResult
+{
+    public System.Collections.Generic.IReadOnlyList<VisualStudioActivityEvent> Events { get; set; } = Array.Empty<VisualStudioActivityEvent>();
 }

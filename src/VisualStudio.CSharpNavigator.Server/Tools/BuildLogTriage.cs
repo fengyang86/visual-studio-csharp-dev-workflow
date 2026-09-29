@@ -28,8 +28,10 @@ internal static partial class BuildLogTriage
         var diagnostics = new List<string>();
         if (buildOutput.Length > MaxInputLength)
         {
-            buildOutput = buildOutput.Substring(0, MaxInputLength);
-            diagnostics.Add($"Build output was truncated to {MaxInputLength} characters before triage.");
+            // MSBuild prints the error summary at the end; keep the tail so a
+            // long failing build keeps its error lines.
+            buildOutput = buildOutput.Substring(buildOutput.Length - MaxInputLength);
+            diagnostics.Add($"Build output was truncated to the last {MaxInputLength} characters before triage.");
         }
 
         var normalizedChangedFiles = changedFiles

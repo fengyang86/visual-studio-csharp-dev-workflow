@@ -20,6 +20,7 @@ builder.Services.Configure<NamedPipeBridgeOptions>(
 builder.Services.AddSingleton<BridgeCallTelemetryRecorder>();
 builder.Services.AddSingleton<IVisualStudioWorkspaceBridge, NamedPipeVisualStudioWorkspaceBridge>();
 builder.Services.AddSingleton<ShortLivedQueryCache>();
+builder.Services.AddSingleton<DiagnosticBaselineStore>();
 builder.Services.AddSingleton<IVisualStudioSolutionLauncher, VisualStudioSolutionLauncher>();
 builder.Services.AddSingleton<CodeNavigationTools>();
 builder.Services.AddSingleton<WorkspacePreparationTools>();
@@ -35,6 +36,8 @@ builder.Services.AddSingleton<DebugContextTools>();
 builder.Services.AddSingleton<DebugControlTools>();
 builder.Services.AddSingleton<AgenticWorkflowTools>();
 builder.Services.AddSingleton<WorkflowEnhancementTools>();
+builder.Services.AddSingleton<BridgeOperationTools>();
+builder.Services.AddSingleton<WorkflowCapabilityTools>();
 builder.Services.AddSingleton<WorkflowKernel>();
 builder.Services.AddSingleton(evidenceStore);
 builder.Services.AddSingleton<MutationSessionStore>();
@@ -45,6 +48,7 @@ builder.Services.AddSingleton<WorkflowSafetyGate>();
 builder.Services.AddSingleton<TaskRouter>();
 builder.Services.AddSingleton<WorkflowTelemetryRecorder>();
 builder.Services.AddSingleton<WorkspaceContextLeaseStore>();
+builder.Services.AddSingleton<DebugScenarioExecutionStore>();
 
 builder.Services
     .AddMcpServer()

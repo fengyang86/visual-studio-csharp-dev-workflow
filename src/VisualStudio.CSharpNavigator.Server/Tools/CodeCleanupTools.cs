@@ -210,6 +210,7 @@ public sealed class CodeCleanupTools
         {
             Diagnostics = new[] { diagnostic },
             IsPartial = true,
+            Succeeded = false,
         };
     }
 }

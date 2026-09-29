@@ -7,7 +7,7 @@ using System.Reflection;
 
 namespace VisualStudio.CSharpNavigator.Server.Tests;
 
-public sealed class CodeNavigationToolsTests
+public sealed partial class CodeNavigationToolsTests
 {
     [Theory]
     [InlineData(nameof(CodeNavigationTools.FindCSharpDefinitions))]
@@ -211,6 +211,7 @@ public sealed class CodeNavigationToolsTests
     {
         var bridge = new RecordingBridge
         {
+            WorkspaceStatusResult = QueryResult(new WorkspaceStatus { IsSolutionLoaded = true, WorkspaceVersion = "snapshot-test" }),
             SearchResult = QueryResult(
                 new SymbolDescriptor
                 {
@@ -225,6 +226,9 @@ public sealed class CodeNavigationToolsTests
         var second = await tools.SearchCSharpSymbols("Widget", cancellationToken: CancellationToken.None);
 
         Assert.Equal(1, bridge.CallCount);
+        // The snapshot status is memoized briefly (see VersionedWorkspaceQueryCache):
+        // a repeated search within the TTL reuses the version lookup too.
+        Assert.Equal(1, bridge.SnapshotCallCount);
         Assert.Single(first.Items);
         Assert.Single(second.Items);
         Assert.DoesNotContain(first.Diagnostics, diagnostic => diagnostic.Contains("ServerCacheHit", StringComparison.OrdinalIgnoreCase));
@@ -234,7 +238,16 @@ public sealed class CodeNavigationToolsTests
     [Fact]
     public async Task SearchCSharpSymbols_WhenRequestDiffers_DoesNotReuseCache()
     {
-        var bridge = new RecordingBridge();
+        var bridge = new RecordingBridge
+        {
+            WorkspaceStatusResult = QueryResult(new WorkspaceStatus
+            {
+                WorkspaceVersion = "snapshot:search",
+                InstanceId = "instance-a",
+                IsSolutionLoaded = true,
+                SolutionPath = @"D:\A\Sample.slnx",
+            }),
+        };
         var tools = new CodeNavigationTools(bridge, new ShortLivedQueryCache(TimeSpan.FromMinutes(1)));
 
         await tools.SearchCSharpSymbols("Widget", maxResults: 10, cancellationToken: CancellationToken.None);
@@ -2520,15 +2533,16 @@ public sealed class CodeNavigationToolsTests
             targetInstanceId: "instance-a",
             cancellationToken: CancellationToken.None);
 
-        Assert.Equal(2, bridge.CallCount);
+        Assert.Equal(1, bridge.CallCount);
         Assert.Equal(2, result.Items.Count);
         Assert.True(result.IsPartial);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Contains(@"D:\A\Two.cs:20:5", StringComparison.Ordinal));
-        Assert.NotNull(bridge.LastSourceContextRequest);
-        Assert.Equal(@"D:\A\Two.cs", bridge.LastSourceContextRequest.Position?.FilePath);
-        Assert.Equal(2, bridge.LastSourceContextRequest.ContextLines);
-        Assert.Equal(3000, bridge.LastSourceContextRequest.MaxChars);
-        Assert.Equal("instance-a", bridge.LastSourceContextRequest.Target?.InstanceId);
+        Assert.NotNull(bridge.LastBatchSourceContextRequest);
+        Assert.Equal(2, bridge.LastBatchSourceContextRequest.Positions.Length);
+        Assert.Equal(@"D:\A\Two.cs", bridge.LastBatchSourceContextRequest.Positions[1].FilePath);
+        Assert.Equal(2, bridge.LastBatchSourceContextRequest.ContextLines);
+        Assert.Equal(3000, bridge.LastBatchSourceContextRequest.MaxCharsPerPosition);
+        Assert.Equal("instance-a", bridge.LastBatchSourceContextRequest.Target?.InstanceId);
     }
 
     [Fact]
@@ -2682,6 +2696,61 @@ public sealed class CodeNavigationToolsTests
         Assert.Equal(CodeDiagnosticNoiseProfile.Filter, bridge.LastDiagnosticsRequest.NoiseProfile);
         Assert.Equal(3, bridge.LastDiagnosticsRequest.MaxProjects);
         Assert.Equal(12000, bridge.LastDiagnosticsRequest.MaxElapsedMilliseconds);
+    }
+
+    [Fact]
+    public async Task GetCSharpDiagnostics_ForwardsDiagnosticCollectionMode()
+    {
+        var bridge = new RecordingBridge();
+        var tools = new CodeNavigationTools(bridge);
+
+        await tools.GetCSharpDiagnostics(
+            includePathPatterns: new[] { @"src\Feature" },
+            collectionMode: CodeDiagnosticCollectionMode.Complete,
+            maxProjects: 7,
+            maxElapsedMilliseconds: 18000,
+            cancellationToken: CancellationToken.None);
+
+        Assert.NotNull(bridge.LastDiagnosticsRequest);
+        Assert.Equal(CodeDiagnosticCollectionMode.Complete, bridge.LastDiagnosticsRequest.CollectionMode);
+        Assert.Equal(7, bridge.LastDiagnosticsRequest.MaxProjects);
+        Assert.Equal(18000, bridge.LastDiagnosticsRequest.MaxElapsedMilliseconds);
+    }
+
+    [Fact]
+    public async Task GetCSharpTaskContext_ForwardsDiagnosticCollectionModeToInvestigation()
+    {
+        var bridge = new RecordingBridge
+        {
+            InstancesResult = QueryResult(
+                new VisualStudioBridgeInstanceDescriptor
+                {
+                    InstanceId = "instance-a",
+                    PipeName = "pipe-a",
+                    SolutionPath = @"D:\A\A.sln",
+                    IsAlive = true,
+                }),
+            WorkspaceStatusResult = QueryResult(
+                new WorkspaceStatus
+                {
+                    InstanceId = "instance-a",
+                    IsSolutionLoaded = true,
+                    SolutionPath = @"D:\A\A.sln",
+                }),
+            DiagnosticsResult = QueryResult<CodeDiagnostic>(),
+        };
+        var tools = new CodeNavigationTools(bridge);
+
+        await tools.GetCSharpTaskContext(
+            includePathPatterns: new[] { @"src\Feature" },
+            collectionMode: CodeDiagnosticCollectionMode.Fast,
+            maxSymbols: 0,
+            maxRelatedItems: 0,
+            maxSourceSnippets: 0,
+            cancellationToken: CancellationToken.None);
+
+        Assert.NotNull(bridge.LastDiagnosticsRequest);
+        Assert.Equal(CodeDiagnosticCollectionMode.Fast, bridge.LastDiagnosticsRequest.CollectionMode);
     }
 
     [Fact]
@@ -3297,14 +3366,26 @@ public sealed class CodeNavigationToolsTests
         var snapshot = Assert.Single(result.Items);
         Assert.Equal("Ready", snapshot.BridgeStatus);
         Assert.Equal(@"D:\A\Sample.sln", snapshot.TargetSolutionPath);
-        Assert.Equal(83, snapshot.ExpectedToolCount);
-        Assert.Equal(83, snapshot.ToolCount);
+        var registeredCount = Assert.Single(new WorkflowCapabilityTools().GetCSharpWorkflowCapabilities().Items).RegisteredToolCount;
+        Assert.Equal(registeredCount, snapshot.ExpectedToolCount);
+        Assert.Equal(registeredCount, snapshot.ToolCount);
         Assert.Contains("vs-ready", snapshot.ActiveInstanceIds);
         Assert.Contains("large", snapshot.RecommendedProfiles);
         Assert.Contains("agentic-resources", snapshot.RecommendedProfiles);
         Assert.Contains(snapshot.SuggestedEnvironmentVariables, value => value.Contains("CODE_NAVIGATOR_BENCHMARK_SOLUTION", StringComparison.Ordinal));
         Assert.Contains(snapshot.BudgetHints, hint => hint.Name == "ReturnedCharacters");
         Assert.Contains(snapshot.TelemetrySignals, signal => signal.Name == "ServerCacheHit");
+    }
+
+    [Fact]
+    public async Task GetCSharpWorkflowPerformanceSnapshot_DoesNotPresentExpectedCountAsObservedCount()
+    {
+        var tools = new CodeNavigationTools(new RecordingBridge());
+        var result = await tools.GetCSharpWorkflowPerformanceSnapshot(expectedToolCount: 1);
+        var snapshot = Assert.Single(result.Items);
+        Assert.Equal(1, snapshot.ExpectedToolCount);
+        Assert.True(snapshot.ToolCount > 1);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.StartsWith("ToolCountExpectationMismatch:", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -3398,6 +3479,7 @@ public sealed class CodeNavigationToolsTests
     {
         var bridge = new RecordingBridge
         {
+            WorkspaceStatusResult = QueryResult(new WorkspaceStatus { IsSolutionLoaded = true, WorkspaceVersion = "snapshot-test" }),
             ProjectGraphResult = QueryResult(new ProjectGraph()),
         };
         var tools = new CodeNavigationTools(bridge, new ShortLivedQueryCache(TimeSpan.FromMinutes(1)));
@@ -4385,6 +4467,7 @@ public sealed class CodeNavigationToolsTests
             {
                 SessionId = sessionId,
                 WorkspaceVersion = workspaceVersion,
+                ChangeFingerprint = "sha256:preview-changes",
                 CandidateIdentity = new MutationCandidateIdentity
                 {
                     DiagnosticId = "CS0103",
@@ -4405,7 +4488,7 @@ public sealed class CodeNavigationToolsTests
         Assert.Null(parameter.DefaultValue);
     }
 
-    private static WorkflowKernel CreateWorkflowKernel(RecordingBridge bridge, EvidenceStore? evidenceStore = null)
+    private static WorkflowKernel CreateWorkflowKernel(RecordingBridge bridge, EvidenceStore? evidenceStore = null, WorkspaceContextLeaseStore? leases = null)
     {
         return new WorkflowKernel(
             new CodeNavigationTools(bridge),
@@ -4414,11 +4497,21 @@ public sealed class CodeNavigationToolsTests
             new WorkflowSafetyGate(),
             new TaskRouter(),
             new WorkflowTelemetryRecorder(),
-            new WorkspaceContextLeaseStore());
+            leases ?? new WorkspaceContextLeaseStore());
     }
 
-    private sealed class RecordingBridge : IVisualStudioWorkspaceBridge
+    internal sealed class RecordingBridge : IVisualStudioWorkspaceBridge
     {
+        public int SnapshotCallCount { get; private set; }
+
+        public int ListInstancesDelayMilliseconds { get; set; }
+
+        public CSharpTextEditRequest? LastTextEditPreviewRequest { get; private set; }
+
+        public CSharpTextEditApplyRequest? LastTextEditApplyRequest { get; private set; }
+
+        public LiveDiagnosticsRequest? LastLiveDiagnosticsRequest { get; private set; }
+
         public WorkspaceQueryResult<VisualStudioBridgeInstanceDescriptor>? InstancesResult { get; set; }
 
         public Queue<WorkspaceQueryResult<VisualStudioBridgeInstanceDescriptor>>? InstancesResults { get; set; }
@@ -4507,6 +4600,8 @@ public sealed class CodeNavigationToolsTests
 
         public SourceContextRequest? LastSourceContextRequest { get; private set; }
 
+        public BatchSourceContextRequest? LastBatchSourceContextRequest { get; private set; }
+
         public TemporaryMarkersRequest? LastTemporaryMarkersRequest { get; private set; }
 
         public ProjectGraphRequest? LastProjectGraphRequest { get; private set; }
@@ -4533,24 +4628,35 @@ public sealed class CodeNavigationToolsTests
 
         public DebugBreakpointMutationRequest? LastBreakpointMutationRequest { get; private set; }
 
-        public Task<WorkspaceQueryResult<VisualStudioBridgeInstanceDescriptor>> ListVisualStudioInstancesAsync(
+        public async Task<WorkspaceQueryResult<VisualStudioBridgeInstanceDescriptor>> ListVisualStudioInstancesAsync(
             VisualStudioInstancesRequest request,
             CancellationToken cancellationToken)
         {
             CallCount++;
+            if (ListInstancesDelayMilliseconds > 0)
+            {
+                await Task.Delay(ListInstancesDelayMilliseconds, cancellationToken);
+            }
             if (InstancesResults is { Count: > 0 })
             {
-                return Task.FromResult(InstancesResults.Dequeue());
+                return InstancesResults.Dequeue();
             }
 
-            return Task.FromResult(InstancesResult ?? Empty<VisualStudioBridgeInstanceDescriptor>());
+            return InstancesResult ?? Empty<VisualStudioBridgeInstanceDescriptor>();
         }
 
         public Task<WorkspaceQueryResult<WorkspaceStatus>> GetWorkspaceStatusAsync(
             WorkspaceStatusRequest request,
             CancellationToken cancellationToken)
         {
-            CallCount++;
+            if (request.SnapshotOnly)
+            {
+                SnapshotCallCount++;
+            }
+            else
+            {
+                CallCount++;
+            }
             LastWorkspaceStatusRequest = request;
             return Task.FromResult(WorkspaceStatusResult ?? Empty<WorkspaceStatus>());
         }
@@ -4635,6 +4741,34 @@ public sealed class CodeNavigationToolsTests
             }
 
             return Task.FromResult(SourceContextResult ?? Empty<SourceContextSnippet>());
+        }
+
+        public Task<WorkspaceQueryResult<SourceContextSnippet>> GetSourceContextsAsync(
+            BatchSourceContextRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastBatchSourceContextRequest = request;
+            var items = new List<SourceContextSnippet>();
+            var diagnostics = new List<string>();
+            var isPartial = false;
+            foreach (var position in request.Positions)
+            {
+                var result = SourceContextResults is { Count: > 0 }
+                    ? SourceContextResults.Dequeue()
+                    : SourceContextResult ?? Empty<SourceContextSnippet>();
+                items.AddRange(result.Items);
+                diagnostics.AddRange(result.Diagnostics.Select(diagnostic =>
+                    $"SourceContext[{position.FilePath}:{position.Line}:{position.Column}]: {diagnostic}"));
+                isPartial |= result.IsPartial;
+            }
+
+            return Task.FromResult(new WorkspaceQueryResult<SourceContextSnippet>
+            {
+                Items = items,
+                Diagnostics = diagnostics,
+                IsPartial = isPartial,
+            });
         }
 
         public Task<WorkspaceQueryResult<DocumentSymbolNode>> ListDocumentSymbolsAsync(
@@ -4767,6 +4901,57 @@ public sealed class CodeNavigationToolsTests
         {
             CallCount++;
             return Task.FromResult(Empty<CSharpCleanupApplyResult>());
+        }
+
+        public Task<WorkspaceQueryResult<CSharpTextEditPreview>> PreviewTextEditAsync(
+            CSharpTextEditRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastTextEditPreviewRequest = request;
+            return Task.FromResult(Empty<CSharpTextEditPreview>());
+        }
+
+        public Task<WorkspaceQueryResult<CSharpTextEditApplyResult>> ApplyTextEditAsync(
+            CSharpTextEditApplyRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastTextEditApplyRequest = request;
+            return Task.FromResult(Empty<CSharpTextEditApplyResult>());
+        }
+
+        public Task<WorkspaceQueryResult<CodeDiagnostic>> GetLiveDiagnosticsAsync(
+            LiveDiagnosticsRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastLiveDiagnosticsRequest = request;
+            return Task.FromResult(Empty<CodeDiagnostic>());
+        }
+
+        public Task<WorkspaceQueryResult<VisualStudioBuildResult>> StartVisualStudioBuildAsync(
+            VisualStudioBuildRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(Empty<VisualStudioBuildResult>());
+        }
+
+        public Task<WorkspaceQueryResult<VisualStudioBuildStatus>> GetVisualStudioBuildStatusAsync(
+            VisualStudioBuildStatusRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(Empty<VisualStudioBuildStatus>());
+        }
+
+        public Task<WorkspaceQueryResult<VisualStudioActivityResult>> GetVisualStudioActivityAsync(
+            VisualStudioActivityRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(Empty<VisualStudioActivityResult>());
         }
 
         public Task<WorkspaceQueryResult<CSharpCodeFixCandidate>> ListCodeFixesAsync(

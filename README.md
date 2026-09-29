@@ -7,12 +7,15 @@ A local MCP workflow for AI-assisted C# development in Visual Studio. It combine
 - Workspace preparation for `.sln` and `.slnx` solutions.
 - Compact source context, symbol navigation, references, call graphs, and impact analysis.
 - Scoped diagnostics and build-failure triage designed to suppress unrelated solution noise.
+- Repository-specific diagnostic noise can be configured in `.csharp-workflow.json`; project directory names are not embedded in the tool.
 - Change review, related-test discovery, and focused verification planning.
 - Preview-first rename, cleanup, Code Fix, and Fix All workflows.
 - Debugger context and explicit debug controls.
 - MCP resources for deferred evidence, reducing repeated output and model context usage.
 
-The current MCP schema exposes 83 tools and 15 resource templates.
+The current MCP schema exposes 96 tools and 15 resource templates. Use
+`get_csharp_workflow_capabilities` for local task-based discovery and
+`get_csharp_operation_status` to reconcile interrupted operations without replaying them.
 
 ## Architecture
 
@@ -73,6 +76,10 @@ Build the dual-host distribution zip:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\New-VisualStudioCSharpNavigatorDistribution.ps1 -Version 0.2.0
 ```
+
+### Workspace diagnostics configuration
+
+Copy `.csharp-workflow.example.json` to `.csharp-workflow.json` at the repository root when a solution contains known noisy legacy or generated directories. Patterns are applied only to that workspace and are combined with the built-in generic `bin`, `obj`, `generated`, `vendor`, and package rules. Use `noiseProfile=Off` for a complete audit.
 
 ## Safety model
 

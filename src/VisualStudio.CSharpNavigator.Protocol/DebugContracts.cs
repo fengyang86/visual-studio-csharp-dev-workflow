@@ -106,6 +106,85 @@ public sealed class CSharpDebugScenarioStep
     public string ExpectedEvidence { get; set; } = string.Empty;
 }
 
+public enum DebugScenarioExecutionState
+{
+    Unknown = 0,
+    Running = 1,
+    Completed = 2,
+    Failed = 3,
+    CleanupIncomplete = 4,
+    OutcomeUnknown = 5,
+}
+
+public sealed class CSharpDebugScenarioExecutionRequest : IVisualStudioBridgeTargetedRequest
+{
+    public string? ScenarioName { get; set; }
+
+    public string? ProblemText { get; set; }
+
+    public string? BreakpointFilePath { get; set; }
+
+    public int? BreakpointLine { get; set; }
+
+    public string[] ArtifactPaths { get; set; } = Array.Empty<string>();
+
+    public bool StopDebuggingAtEnd { get; set; } = true;
+
+    public int WaitTimeoutMilliseconds { get; set; } = 30000;
+
+    public VisualStudioBridgeTarget? Target { get; set; }
+}
+
+public sealed class CSharpDebugScenarioExecution
+{
+    public string ExecutionId { get; set; } = string.Empty;
+
+    public string ScenarioName { get; set; } = string.Empty;
+
+    public DebugScenarioExecutionState State { get; set; }
+
+    public VisualStudioBridgeTarget Target { get; set; } = new();
+
+    public bool StartedDebugger { get; set; }
+
+    public bool CreatedBreakpoint { get; set; }
+
+    public string OwnedBreakpointName { get; set; } = string.Empty;
+
+    public bool CleanupRequested { get; set; }
+
+    public bool CleanupCompleted { get; set; }
+
+    public DebugSessionPreparationPlan? BeforeStopSnapshot { get; set; }
+
+    public DebugSessionPreparationPlan? AfterStopSnapshot { get; set; }
+
+    public ArtifactEvidenceReport? ArtifactEvidence { get; set; }
+
+    public CSharpDebugScenarioStepResult[] Steps { get; set; } = Array.Empty<CSharpDebugScenarioStepResult>();
+
+    public string[] Diagnostics { get; set; } = Array.Empty<string>();
+
+    public DateTimeOffset StartedUtc { get; set; }
+
+    public DateTimeOffset? CompletedUtc { get; set; }
+}
+
+public sealed class CSharpDebugScenarioStepResult
+{
+    public int Order { get; set; }
+
+    public string Phase { get; set; } = string.Empty;
+
+    public string ToolName { get; set; } = string.Empty;
+
+    public bool Succeeded { get; set; }
+
+    public bool IsPartial { get; set; }
+
+    public string[] Diagnostics { get; set; } = Array.Empty<string>();
+}
+
 public sealed class DebuggerStatusRequest : IVisualStudioBridgeTargetedRequest
 {
     public VisualStudioBridgeTarget? Target { get; set; }

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace VisualStudio.CSharpNavigator.Server.Bridge;
 
-public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspaceBridge
+public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspaceBridge, IVisualStudioOperationBridge
 {
     private const string ProtocolVersion = "1";
 
@@ -35,7 +35,9 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var discovery = ReadDiscoveredInstances(request.IncludeStale);
+        // The listing tool is what agents poll to observe instance state; keep it
+        // uncached so freshly written discovery records are visible immediately.
+        var discovery = ReadDiscoveredInstances(request.IncludeStale, useCache: false);
         return Task.FromResult(new WorkspaceQueryResult<VisualStudioBridgeInstanceDescriptor>
         {
             Items = discovery.Instances,
@@ -130,6 +132,16 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
     {
         return SendAsync<SourceContextRequest, SourceContextSnippet>(
             "GetSourceContext",
+            request,
+            cancellationToken);
+    }
+
+    public Task<WorkspaceQueryResult<SourceContextSnippet>> GetSourceContextsAsync(
+        BatchSourceContextRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync<BatchSourceContextRequest, SourceContextSnippet>(
+            "GetSourceContexts",
             request,
             cancellationToken);
     }
@@ -504,6 +516,66 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
             cancellationToken);
     }
 
+    public Task<WorkspaceQueryResult<CSharpTextEditPreview>> PreviewTextEditAsync(
+        CSharpTextEditRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync<CSharpTextEditRequest, CSharpTextEditPreview>(
+            "PreviewTextEdit",
+            request,
+            cancellationToken);
+    }
+
+    public Task<WorkspaceQueryResult<CSharpTextEditApplyResult>> ApplyTextEditAsync(
+        CSharpTextEditApplyRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync<CSharpTextEditApplyRequest, CSharpTextEditApplyResult>(
+            "ApplyTextEdit",
+            request,
+            cancellationToken);
+    }
+
+    public Task<WorkspaceQueryResult<CodeDiagnostic>> GetLiveDiagnosticsAsync(
+        LiveDiagnosticsRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync<LiveDiagnosticsRequest, CodeDiagnostic>(
+            "GetLiveDiagnostics",
+            request,
+            cancellationToken);
+    }
+
+    public Task<WorkspaceQueryResult<VisualStudioBuildResult>> StartVisualStudioBuildAsync(
+        VisualStudioBuildRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync<VisualStudioBuildRequest, VisualStudioBuildResult>(
+            "StartVisualStudioBuild",
+            request,
+            cancellationToken);
+    }
+
+    public Task<WorkspaceQueryResult<VisualStudioBuildStatus>> GetVisualStudioBuildStatusAsync(
+        VisualStudioBuildStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync<VisualStudioBuildStatusRequest, VisualStudioBuildStatus>(
+            "GetVisualStudioBuildStatus",
+            request,
+            cancellationToken);
+    }
+
+    public Task<WorkspaceQueryResult<VisualStudioActivityResult>> GetVisualStudioActivityAsync(
+        VisualStudioActivityRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync<VisualStudioActivityRequest, VisualStudioActivityResult>(
+            "GetVisualStudioActivity",
+            request,
+            cancellationToken);
+    }
+
     public Task<WorkspaceQueryResult<CSharpCodeFixCandidate>> ListCodeFixesAsync(
         CSharpCodeFixListRequest request,
         CancellationToken cancellationToken)
@@ -564,6 +636,14 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
             cancellationToken);
     }
 
+    public Task<WorkspaceQueryResult<BridgeOperationStatus>> GetOperationStatusAsync(
+        BridgeOperationStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync<BridgeOperationStatusRequest, BridgeOperationStatus>(
+            "GetOperationStatus", request, cancellationToken);
+    }
+
     private async Task<WorkspaceQueryResult<TResponseItem>> SendAsync<TRequest, TResponseItem>(
         string method,
         TRequest payload,
@@ -586,9 +666,34 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
         var request = new PipeBridgeRequest<TRequest>
         {
             ProtocolVersion = ProtocolVersion,
+            RequestId = Guid.NewGuid().ToString("N"),
             Method = method,
             Payload = payload,
         };
+        var tracked = BridgeOperationPolicy.RequiresTracking(method);
+        var writeAttempted = false;
+
+        WorkspaceQueryResult<TResponseItem> WithReceipt(WorkspaceQueryResult<TResponseItem> result)
+        {
+            if (tracked)
+            {
+                var confirmed = string.Equals(response?.OperationId, request.RequestId, StringComparison.Ordinal);
+                result.Diagnostics = result.Diagnostics.Concat(new[]
+                {
+                    $"BridgeOperationReceipt: requestId={request.RequestId}; targetPipeName={pipeName}; tracking={(confirmed ? "Confirmed" : "Unconfirmed")}",
+                    confirmed
+                        ? "The operation record can be queried via get_csharp_operation_status."
+                        : response?.Result is not null && response.Error is null
+                            && string.Equals(response.ProtocolVersion, ProtocolVersion, StringComparison.Ordinal)
+                            ? "BridgeOperationTrackingUnconfirmed: An operation response was received, but the target did not confirm record retention; subsequent result queries may not be available."
+                            : writeAttempted
+                                ? "OperationOutcomeUnconfirmed: The request may have executed; query the operation record and verify state. Do not retry blindly. Older VSIX versions may not support result queries."
+                                : "BridgeOperationNotSent: 尚未发送请求。",
+                }).ToArray();
+            }
+
+            return result;
+        }
 
         try
         {
@@ -606,14 +711,24 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
                 AutoFlush = true,
             };
             using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
+            using var cancellationRegistration = cancellationToken.Register(
+                () => _ = Task.Run(
+                    () => SendCancelRequestAsync(pipeName, request.RequestId),
+                    CancellationToken.None));
 
             var requestJson = JsonSerializer.Serialize(request, JsonOptions);
+            writeAttempted = true;
             await writer.WriteLineAsync(requestJson.AsMemory(), cancellationToken).ConfigureAwait(false);
 
-            var responseJson = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            // The VSIX can wedge (blocked UI thread, dead pipe server); without a
+            // read deadline an uncached bridge call would hang until the MCP
+            // client gives up, which many hosts never do.
+            using var responseTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            responseTimeout.CancelAfter(_options.ResponseTimeoutMilliseconds);
+            var responseJson = await reader.ReadLineAsync(responseTimeout.Token).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(responseJson))
             {
-                return Failure<TResponseItem>("The Visual Studio bridge returned an empty response.");
+                return WithReceipt(Failure<TResponseItem>("The Visual Studio bridge returned an empty response."));
             }
 
             response = JsonSerializer.Deserialize<PipeBridgeResponse<TResponseItem>>(
@@ -621,25 +736,36 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
                 JsonOptions);
             if (response is null)
             {
-                return Failure<TResponseItem>("The Visual Studio bridge returned an invalid response.");
+                return WithReceipt(Failure<TResponseItem>("The Visual Studio bridge returned an invalid response."));
             }
 
             if (!string.Equals(response.ProtocolVersion, ProtocolVersion, StringComparison.Ordinal))
             {
-                return Failure<TResponseItem>(
-                    $"Unsupported Visual Studio bridge protocol version '{response.ProtocolVersion}'.");
+                return WithReceipt(Failure<TResponseItem>(
+                    $"Unsupported Visual Studio bridge protocol version '{response.ProtocolVersion}'."));
             }
 
             if (response.Error is not null)
             {
-                return Failure<TResponseItem>(
-                    $"{response.Error.Code}: {response.Error.Message}");
+                return WithReceipt(Failure<TResponseItem>(
+                    $"{response.Error.Code}: {response.Error.Message}"));
             }
 
             var result = response.Result ?? Failure<TResponseItem>(
                 "The Visual Studio bridge response did not include a result.");
             succeeded = response.Error is null;
-            return result;
+            return WithReceipt(result);
+        }
+        catch (OperationCanceledException ex) when (tracked && writeAttempted)
+        {
+            throw new OperationCanceledException(
+                $"OperationOutcomeUnconfirmed: requestId={request.RequestId}; targetPipeName={pipeName}; Query the operation record; do not retry blindly.",
+                ex, cancellationToken);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && writeAttempted)
+        {
+            return WithReceipt(Failure<TResponseItem>(
+                $"BridgeResponseTimeout: the Visual Studio bridge did not respond within {_options.ResponseTimeoutMilliseconds} milliseconds. The request may still be running; do not retry blindly."));
         }
         catch (OperationCanceledException)
         {
@@ -647,28 +773,60 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
         }
         catch (TimeoutException)
         {
-            return Failure<TResponseItem>(
-                $"Timed out connecting to Visual Studio bridge pipe '{pipeName}'. Is the selected VSIX instance loaded?");
+            return WithReceipt(Failure<TResponseItem>(
+                $"Timed out connecting to Visual Studio bridge pipe '{pipeName}'. Is the selected VSIX instance loaded?"));
         }
         catch (IOException ex)
         {
-            return Failure<TResponseItem>(
-                $"Could not communicate with Visual Studio bridge pipe '{pipeName}': {ex.Message}");
+            return WithReceipt(Failure<TResponseItem>(
+                $"Could not communicate with Visual Studio bridge pipe '{pipeName}': {ex.Message}"));
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Failure<TResponseItem>(
-                $"Access denied to Visual Studio bridge pipe '{pipeName}': {ex.Message}");
+            return WithReceipt(Failure<TResponseItem>(
+                $"Access denied to Visual Studio bridge pipe '{pipeName}': {ex.Message}"));
         }
         catch (JsonException ex)
         {
-            return Failure<TResponseItem>(
-                $"The Visual Studio bridge returned invalid JSON: {ex.Message}");
+            return WithReceipt(Failure<TResponseItem>(
+                $"The Visual Studio bridge returned invalid JSON: {ex.Message}"));
         }
         finally
         {
             stopwatch.Stop();
             _telemetryRecorder.Record(method, stopwatch.ElapsedMilliseconds, response?.BridgeExecutionMilliseconds ?? 0, succeeded);
+        }
+    }
+
+    private async Task SendCancelRequestAsync(string pipeName, string requestId)
+    {
+        try
+        {
+            await using var pipe = new NamedPipeClientStream(
+                ".",
+                pipeName,
+                PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            await pipe.ConnectAsync(_options.ConnectTimeoutMilliseconds, timeout.Token).ConfigureAwait(false);
+            await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true)
+            {
+                AutoFlush = true,
+            };
+            var request = new PipeBridgeRequest<CancelPipeBridgeRequest>
+            {
+                ProtocolVersion = ProtocolVersion,
+                RequestId = string.Empty,
+                Method = "CancelRequest",
+                Payload = new CancelPipeBridgeRequest { RequestId = requestId },
+            };
+            await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions).AsMemory(), timeout.Token).ConfigureAwait(false);
+            using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
+            await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            _telemetryRecorder.Record("CancelRequest", 0, 0, false);
         }
     }
 
@@ -850,7 +1008,52 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
         return PipeResolution<T>.Success(match.PipeName);
     }
 
-    private DiscoveryReadResult ReadDiscoveredInstances(bool includeStale)
+    // Discovery resolution happens on every SendAsync; rescanning the directory
+    // (enumerate + JSON parse + process liveness probes) 5-12 times per workflow
+    // tool call is pure overhead. A short TTL is safe: heartbeats write every
+    // 10s and staleness uses a 30s window, so 1.5s of drift is immaterial. The
+    // user-facing instance listing bypasses the cache to stay fresh.
+    private const double DiscoveryCacheMilliseconds = 1500;
+
+    private readonly object _discoveryCacheGate = new();
+    private readonly DiscoveryCacheSlot[] _discoveryCache = { new(), new() };
+
+    private sealed class DiscoveryCacheSlot
+    {
+        public DiscoveryReadResult? Result;
+        public DateTimeOffset ReadAtUtc = DateTimeOffset.MinValue;
+    }
+
+    private DiscoveryReadResult ReadDiscoveredInstances(bool includeStale, bool useCache = true)
+    {
+        if (useCache)
+        {
+            var slot = _discoveryCache[includeStale ? 1 : 0];
+            lock (_discoveryCacheGate)
+            {
+                if (slot.Result.HasValue
+                    && (DateTimeOffset.UtcNow - slot.ReadAtUtc).TotalMilliseconds < DiscoveryCacheMilliseconds)
+                {
+                    return slot.Result.Value;
+                }
+            }
+        }
+
+        var result = ReadDiscoveredInstancesCore(includeStale);
+        if (useCache)
+        {
+            lock (_discoveryCacheGate)
+            {
+                var slot = _discoveryCache[includeStale ? 1 : 0];
+                slot.Result = result;
+                slot.ReadAtUtc = DateTimeOffset.UtcNow;
+            }
+        }
+
+        return result;
+    }
+
+    private DiscoveryReadResult ReadDiscoveredInstancesCore(bool includeStale)
     {
         if (string.IsNullOrWhiteSpace(_options.DiscoveryDirectory)
             || !Directory.Exists(_options.DiscoveryDirectory))
@@ -1031,12 +1234,15 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
             Items = Array.Empty<T>(),
             Diagnostics = new[] { diagnostic },
             IsPartial = true,
+            Succeeded = false,
         };
     }
 
     private sealed class PipeBridgeRequest<TPayload>
     {
         public string ProtocolVersion { get; set; } = NamedPipeVisualStudioWorkspaceBridge.ProtocolVersion;
+
+        public string RequestId { get; set; } = string.Empty;
 
         public string Method { get; set; } = string.Empty;
 
@@ -1052,6 +1258,13 @@ public sealed class NamedPipeVisualStudioWorkspaceBridge : IVisualStudioWorkspac
         public PipeBridgeError? Error { get; set; }
 
         public long BridgeExecutionMilliseconds { get; set; }
+
+        public string? OperationId { get; set; }
+    }
+
+    private sealed class CancelPipeBridgeRequest
+    {
+        public string RequestId { get; set; } = string.Empty;
     }
 
     private sealed class PipeBridgeError

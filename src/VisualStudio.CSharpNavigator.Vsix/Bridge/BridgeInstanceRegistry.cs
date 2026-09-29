@@ -20,6 +20,9 @@ internal sealed class BridgeInstanceRegistry : IDisposable
     private readonly VisualStudioWorkspaceQueryService _queryService;
     private readonly Timer _heartbeatTimer;
     private readonly string _recordPath;
+    private int _writingRecord;
+    private string? _extensionAssemblyVersion;
+    private string? _extensionFileVersion;
     private bool _disposed;
 
     public BridgeInstanceRegistry(VisualStudioWorkspaceQueryService queryService)
@@ -70,7 +73,15 @@ internal sealed class BridgeInstanceRegistry : IDisposable
 
     public async Task WriteRecordAsync(CancellationToken cancellationToken)
     {
-        var status = await GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        // The discovery record only needs the solution identity. The full status
+        // (DTE reads, per-project XML parsing, FileVersionInfo) is pure overhead
+        // on a 10-second heartbeat.
+        var statusResult = await _queryService.GetWorkspaceStatusResultAsync(
+            InstanceId,
+            ProcessId,
+            cancellationToken,
+            snapshotOnly: true).ConfigureAwait(false);
+        var status = statusResult.Items.Count > 0 ? statusResult.Items[0] : new WorkspaceStatus();
         var instance = new VisualStudioBridgeInstance
         {
             InstanceId = InstanceId,
@@ -84,16 +95,47 @@ internal sealed class BridgeInstanceRegistry : IDisposable
             LastSeenUtc = DateTimeOffset.UtcNow,
         };
 
-        var json = JsonSerializer.Serialize(instance, JsonOptions);
-        var tempPath = _recordPath + ".tmp";
-        File.WriteAllText(tempPath, json);
-        if (File.Exists(_recordPath))
+        // Skip a beat when the previous write is still in flight instead of
+        // racing two writers on the same temp file.
+        if (Interlocked.CompareExchange(ref _writingRecord, 1, 0) != 0)
         {
-            File.Replace(tempPath, _recordPath, null);
+            BridgeLog.Warning("Skipped a bridge heartbeat because the previous record write is still running.");
+            return;
         }
-        else
+
+        try
         {
-            File.Move(tempPath, _recordPath);
+            var json = JsonSerializer.Serialize(instance, JsonOptions);
+            var tempPath = _recordPath + ".tmp." + Guid.NewGuid().ToString("N");
+            try
+            {
+                File.WriteAllText(tempPath, json);
+                if (File.Exists(_recordPath))
+                {
+                    File.Replace(tempPath, _recordPath, null);
+                }
+                else
+                {
+                    File.Move(tempPath, _recordPath);
+                }
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    try
+                    {
+                        File.Delete(tempPath);
+                    }
+                    catch (IOException)
+                    {
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _writingRecord, 0);
         }
     }
 
@@ -135,15 +177,22 @@ internal sealed class BridgeInstanceRegistry : IDisposable
         }
     }
 
-    private static string GetExtensionAssemblyVersion()
+    // Both values are immutable for the lifetime of the VS process; cache them
+    // instead of calling FileVersionInfo on every heartbeat.
+    private string GetExtensionAssemblyVersion()
     {
-        return typeof(BridgeInstanceRegistry).Assembly.GetName().Version?.ToString() ?? string.Empty;
+        return _extensionAssemblyVersion ??= typeof(BridgeInstanceRegistry).Assembly.GetName().Version?.ToString() ?? string.Empty;
     }
 
-    private static string GetExtensionFileVersion()
+    private string GetExtensionFileVersion()
     {
+        if (_extensionFileVersion is not null)
+        {
+            return _extensionFileVersion;
+        }
+
         var assemblyPath = typeof(BridgeInstanceRegistry).Assembly.Location;
-        return string.IsNullOrWhiteSpace(assemblyPath)
+        return _extensionFileVersion = string.IsNullOrWhiteSpace(assemblyPath)
             ? string.Empty
             : FileVersionInfo.GetVersionInfo(assemblyPath).FileVersion ?? string.Empty;
     }

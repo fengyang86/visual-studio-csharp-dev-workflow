@@ -33,15 +33,39 @@ public sealed class WorkflowKernel
         _workspaceContextLeases = workspaceContextLeases;
     }
 
-    public async Task<WorkspaceQueryResult<CSharpEditTaskResult>> PrepareCSharpEditTaskAsync(
+    public Task<WorkspaceQueryResult<CSharpEditTaskResult>> PrepareCSharpEditTaskAsync(
+        CSharpEditTaskRequest request,
+        CancellationToken cancellationToken)
+    {
+        var budget = _budgetPolicy.CreateDefaultEditBudget(request);
+        return ExecuteWithDeadlineAsync(
+            "prepare_csharp_edit_task",
+            budget.MaxElapsedMilliseconds,
+            cancellationToken,
+            token => PrepareCSharpEditTaskCoreAsync(request, token));
+    }
+
+    private async Task<WorkspaceQueryResult<CSharpEditTaskResult>> PrepareCSharpEditTaskCoreAsync(
         CSharpEditTaskRequest request,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
+        var phases = new WorkflowPhaseTracker();
         var taskId = CreateTaskId();
-        var targetResolution = await ResolveTargetAsync(request.Target, request.WorkspaceContextLeaseId, cancellationToken).ConfigureAwait(false);
+        TargetResolution targetResolution;
+        using (phases.Measure("target-resolution"))
+        {
+            targetResolution = await ResolveTargetAsync(request.Target, request.WorkspaceContextLeaseId, cancellationToken).ConfigureAwait(false);
+        }
+        if (targetResolution.IsFailure)
+        {
+            return TargetFailure<CSharpEditTaskResult>(targetResolution);
+        }
         request.Target = targetResolution.Target;
-        var contextResult = await _tools.GetCSharpTaskContext(
+        WorkspaceQueryResult<CSharpTaskContextPackage> contextResult;
+        using (phases.Measure("evidence-collection"))
+        {
+            contextResult = await _tools.GetCSharpTaskContext(
                 request.ProblemText,
                 request.BuildOutput,
                 request.BuildLogFilePath,
@@ -53,6 +77,7 @@ public sealed class WorkflowKernel
                 request.ProjectName,
                 request.MinimumSeverity,
                 request.NoiseProfile,
+                request.CollectionMode,
                 request.IncludeWholeSolutionDiagnostics,
                 request.IncludeVisualStudioBuildOutput,
                 request.MaxVisualStudioBuildOutputCharacters,
@@ -68,7 +93,8 @@ public sealed class WorkflowKernel
                 request.Target?.InstanceId,
                 request.Target?.SolutionPath,
                 cancellationToken)
-            .ConfigureAwait(false);
+                .ConfigureAwait(false);
+        }
 
         stopwatch.Stop();
 
@@ -90,6 +116,7 @@ public sealed class WorkflowKernel
             context.SourceSnippets.Length,
             contextResult.IsPartial,
             diagnostics);
+        telemetry.PhaseTimings = phases.Snapshot();
         var packet = _evidencePacketBuilder.BuildEditTaskPacket(
             taskId,
             context,
@@ -120,15 +147,39 @@ public sealed class WorkflowKernel
         };
     }
 
-    public async Task<WorkspaceQueryResult<CSharpChangeReviewTaskResult>> PrepareCSharpChangeReviewAsync(
+    public Task<WorkspaceQueryResult<CSharpChangeReviewTaskResult>> PrepareCSharpChangeReviewAsync(
+        CSharpChangeReviewTaskRequest request,
+        CancellationToken cancellationToken)
+    {
+        var budget = _budgetPolicy.CreateDefaultChangeReviewBudget(request);
+        return ExecuteWithDeadlineAsync(
+            "prepare_csharp_change_review",
+            budget.MaxElapsedMilliseconds,
+            cancellationToken,
+            token => PrepareCSharpChangeReviewCoreAsync(request, token));
+    }
+
+    private async Task<WorkspaceQueryResult<CSharpChangeReviewTaskResult>> PrepareCSharpChangeReviewCoreAsync(
         CSharpChangeReviewTaskRequest request,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
+        var phases = new WorkflowPhaseTracker();
         var taskId = CreateTaskId();
-        var targetResolution = await ResolveTargetAsync(request.Target, request.WorkspaceContextLeaseId, cancellationToken).ConfigureAwait(false);
+        TargetResolution targetResolution;
+        using (phases.Measure("target-resolution"))
+        {
+            targetResolution = await ResolveTargetAsync(request.Target, request.WorkspaceContextLeaseId, cancellationToken).ConfigureAwait(false);
+        }
+        if (targetResolution.IsFailure)
+        {
+            return TargetFailure<CSharpChangeReviewTaskResult>(targetResolution);
+        }
         request.Target = targetResolution.Target;
-        var reviewResult = await _tools.ReviewCSharpChange(
+        WorkspaceQueryResult<CSharpChangeReviewReport> reviewResult;
+        using (phases.Measure("evidence-collection"))
+        {
+            reviewResult = await _tools.ReviewCSharpChange(
                 request.ProblemText,
                 request.BuildOutput,
                 request.BuildLogFilePath,
@@ -140,6 +191,7 @@ public sealed class WorkflowKernel
                 request.ExcludePathPatterns,
                 request.MinimumSeverity,
                 request.NoiseProfile,
+                request.CollectionMode,
                 request.MaxBuildIssues,
                 request.MaxDiagnostics,
                 request.MaxSymbols,
@@ -150,7 +202,8 @@ public sealed class WorkflowKernel
                 request.Target?.InstanceId,
                 request.Target?.SolutionPath,
                 cancellationToken)
-            .ConfigureAwait(false);
+                .ConfigureAwait(false);
+        }
 
         stopwatch.Stop();
 
@@ -171,6 +224,7 @@ public sealed class WorkflowKernel
             1,
             reviewResult.IsPartial,
             diagnostics);
+        telemetry.PhaseTimings = phases.Snapshot();
         var packet = _evidencePacketBuilder.BuildChangeReviewPacket(
             taskId,
             review,
@@ -203,15 +257,39 @@ public sealed class WorkflowKernel
         };
     }
 
-    public async Task<WorkspaceQueryResult<CSharpVerificationRunTaskResult>> PrepareCSharpVerificationRunAsync(
+    public Task<WorkspaceQueryResult<CSharpVerificationRunTaskResult>> PrepareCSharpVerificationRunAsync(
+        CSharpVerificationRunTaskRequest request,
+        CancellationToken cancellationToken)
+    {
+        var budget = _budgetPolicy.CreateDefaultVerificationRunBudget(request);
+        return ExecuteWithDeadlineAsync(
+            "prepare_csharp_verification_run",
+            budget.MaxElapsedMilliseconds,
+            cancellationToken,
+            token => PrepareCSharpVerificationRunCoreAsync(request, token));
+    }
+
+    private async Task<WorkspaceQueryResult<CSharpVerificationRunTaskResult>> PrepareCSharpVerificationRunCoreAsync(
         CSharpVerificationRunTaskRequest request,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
+        var phases = new WorkflowPhaseTracker();
         var taskId = CreateTaskId();
-        var targetResolution = await ResolveTargetAsync(request.Target, request.WorkspaceContextLeaseId, cancellationToken).ConfigureAwait(false);
+        TargetResolution targetResolution;
+        using (phases.Measure("target-resolution"))
+        {
+            targetResolution = await ResolveTargetAsync(request.Target, request.WorkspaceContextLeaseId, cancellationToken).ConfigureAwait(false);
+        }
+        if (targetResolution.IsFailure)
+        {
+            return TargetFailure<CSharpVerificationRunTaskResult>(targetResolution);
+        }
         request.Target = targetResolution.Target;
-        var planResult = await _tools.PlanCSharpRegressionScope(
+        WorkspaceQueryResult<CSharpRegressionScopePlan> planResult;
+        using (phases.Measure("evidence-collection"))
+        {
+            planResult = await _tools.PlanCSharpRegressionScope(
                 request.ProblemText,
                 request.BuildOutput,
                 request.BuildLogFilePath,
@@ -224,6 +302,7 @@ public sealed class WorkflowKernel
                 request.ProjectName,
                 request.MinimumSeverity,
                 request.NoiseProfile,
+                request.CollectionMode,
                 request.IncludeVisualStudioBuildOutput,
                 request.MaxVisualStudioBuildOutputCharacters,
                 request.MaxBuildIssues,
@@ -235,7 +314,8 @@ public sealed class WorkflowKernel
                 request.Target?.InstanceId,
                 request.Target?.SolutionPath,
                 cancellationToken)
-            .ConfigureAwait(false);
+                .ConfigureAwait(false);
+        }
 
         stopwatch.Stop();
 
@@ -256,6 +336,7 @@ public sealed class WorkflowKernel
             1,
             planResult.IsPartial,
             diagnostics);
+        telemetry.PhaseTimings = phases.Snapshot();
         var packet = _evidencePacketBuilder.BuildVerificationRunPacket(
             taskId,
             plan,
@@ -287,15 +368,39 @@ public sealed class WorkflowKernel
         };
     }
 
-    public async Task<WorkspaceQueryResult<CSharpRuntimeExceptionTaskResult>> InvestigateCSharpRuntimeExceptionAsync(
+    public Task<WorkspaceQueryResult<CSharpRuntimeExceptionTaskResult>> InvestigateCSharpRuntimeExceptionAsync(
+        CSharpRuntimeExceptionTaskRequest request,
+        CancellationToken cancellationToken)
+    {
+        var budget = _budgetPolicy.CreateDefaultRuntimeExceptionBudget(request);
+        return ExecuteWithDeadlineAsync(
+            "investigate_csharp_runtime_exception",
+            budget.MaxElapsedMilliseconds,
+            cancellationToken,
+            token => InvestigateCSharpRuntimeExceptionCoreAsync(request, token));
+    }
+
+    private async Task<WorkspaceQueryResult<CSharpRuntimeExceptionTaskResult>> InvestigateCSharpRuntimeExceptionCoreAsync(
         CSharpRuntimeExceptionTaskRequest request,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
+        var phases = new WorkflowPhaseTracker();
         var taskId = CreateTaskId();
-        var targetResolution = await ResolveTargetAsync(request.Target, request.WorkspaceContextLeaseId, cancellationToken).ConfigureAwait(false);
+        TargetResolution targetResolution;
+        using (phases.Measure("target-resolution"))
+        {
+            targetResolution = await ResolveTargetAsync(request.Target, request.WorkspaceContextLeaseId, cancellationToken).ConfigureAwait(false);
+        }
+        if (targetResolution.IsFailure)
+        {
+            return TargetFailure<CSharpRuntimeExceptionTaskResult>(targetResolution);
+        }
         request.Target = targetResolution.Target;
-        var debugResult = await _tools.PrepareDebugSession(
+        WorkspaceQueryResult<DebugSessionPreparationPlan> debugResult;
+        using (phases.Measure("debug-evidence"))
+        {
+            debugResult = await _tools.PrepareDebugSession(
                 request.MaxBreakpoints,
                 request.MaxFrames,
                 request.MaxSourceSnippets,
@@ -306,14 +411,17 @@ public sealed class WorkflowKernel
                 request.Target?.InstanceId,
                 request.Target?.SolutionPath,
                 cancellationToken)
-            .ConfigureAwait(false);
+                .ConfigureAwait(false);
+        }
 
         ArtifactEvidenceReport? artifactEvidence = null;
         var diagnostics = targetResolution.Diagnostics.Concat(debugResult.Diagnostics).ToList();
         var artifactPartial = false;
         if (request.ArtifactPaths.Length > 0)
         {
-            var artifactResult = await _tools.CollectArtifactEvidence(
+            using (phases.Measure("artifact-evidence"))
+            {
+                var artifactResult = await _tools.CollectArtifactEvidence(
                     request.ArtifactPaths,
                     rootDirectories: null,
                     searchPatterns: null,
@@ -323,10 +431,11 @@ public sealed class WorkflowKernel
                     maxLinesPerArtifact: 20,
                     maxCharsPerArtifact: 12000,
                     cancellationToken)
-                .ConfigureAwait(false);
-            diagnostics.AddRange(artifactResult.Diagnostics.Select(diagnostic => "ArtifactEvidence: " + diagnostic));
-            artifactEvidence = artifactResult.Items.FirstOrDefault();
-            artifactPartial = artifactResult.IsPartial;
+                    .ConfigureAwait(false);
+                diagnostics.AddRange(artifactResult.Diagnostics.Select(diagnostic => "ArtifactEvidence: " + diagnostic));
+                artifactEvidence = artifactResult.Items.FirstOrDefault();
+                artifactPartial = artifactResult.IsPartial;
+            }
         }
 
         stopwatch.Stop();
@@ -343,6 +452,7 @@ public sealed class WorkflowKernel
             1,
             debugResult.IsPartial || artifactPartial,
             diagnostics);
+        telemetry.PhaseTimings = phases.Snapshot();
         var packet = _evidencePacketBuilder.BuildRuntimeExceptionPacket(
             taskId,
             debugPlan,
@@ -420,12 +530,38 @@ public sealed class WorkflowKernel
         string? leaseId,
         CancellationToken cancellationToken)
     {
+        var target = requestedTarget ?? new VisualStudioBridgeTarget();
         if (_workspaceContextLeases.TryGet(leaseId, out var lease))
         {
-            return new TargetResolution(lease.Target, Array.Empty<string>());
+            if (WorkspaceTargetIdentity.Conflicts(target, lease.Target))
+            {
+                return new TargetResolution(target,
+                    new[] { "WorkspaceContextLeaseTargetMismatch: 显式目标与租约不一致，请移除旧租约后重新选择目标。" }, true);
+            }
+
+            var currentInstances = await _tools.ListVisualStudioInstances(includeStale: false, cancellationToken).ConfigureAwait(false);
+            var current = currentInstances.Items.Where(instance => !instance.IsStale)
+                .Where(instance => WorkspaceTargetIdentity.Matches(lease.Target, new VisualStudioBridgeTarget
+                {
+                    PipeName = instance.PipeName,
+                    InstanceId = instance.InstanceId,
+                    SolutionPath = instance.SolutionPath,
+                }))
+                .Where(instance => string.Equals(lease.SolutionPath.Replace('/', '\\'),
+                    instance.SolutionPath.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (currentInstances.IsPartial || lease.Target.IsEmpty || current.Length != 1)
+            {
+                return new TargetResolution(target,
+                    new[] { "WorkspaceContextLeaseInvalidated: 原实例已不可用或解决方案已变化，请重新准备工作区。" }, true);
+            }
+
+            if (WorkspaceTargetIdentity.Matches(target, lease.Target))
+            {
+                return new TargetResolution(WorkspaceTargetIdentity.Copy(lease.Target), Array.Empty<string>());
+            }
         }
 
-        var target = requestedTarget ?? new VisualStudioBridgeTarget();
         if (!string.IsNullOrWhiteSpace(target.PipeName))
         {
             return new TargetResolution(target, Array.Empty<string>());
@@ -473,16 +609,27 @@ public sealed class WorkflowKernel
             TrimPacket(GetPacket(result), primaryLimit: 12, supportingLimit: 4);
         }
 
-        var serializedLength = JsonSerializer.Serialize(result).Length;
-        GetPacket(result).Telemetry.ReturnedCharacterCount = serializedLength;
-        if (serializedLength <= budget.MaxReturnedChars)
+        for (var pass = 0; pass < 4; pass++)
         {
-            return false;
+            var serializedLength = JsonSerializer.Serialize(result).Length;
+            GetPacket(result).Telemetry.ReturnedCharacterCount = serializedLength;
+            if (serializedLength <= budget.MaxReturnedChars)
+            {
+                return false;
+            }
+
+            TrimPacket(
+                GetPacket(result),
+                primaryLimit: pass == 0 ? 4 : 2,
+                supportingLimit: 0);
+            SuppressDetailedPayload(result);
+            if (pass >= 1)
+            {
+                TrimRecommendedText(result);
+            }
         }
 
-        TrimPacket(GetPacket(result), primaryLimit: 4, supportingLimit: 0);
-        SuppressDetailedPayload(result);
-        GetPacket(result).Diagnostics = GetPacket(result).Diagnostics.Take(4)
+        GetPacket(result).Diagnostics = GetPacket(result).Diagnostics.Take(3)
             .Append("ResponseBudgetExceeded: detailed evidence is available from resourceLinks.")
             .ToArray();
         GetPacket(result).Telemetry.ReturnedCharacterCount = JsonSerializer.Serialize(result).Length;
@@ -540,6 +687,44 @@ public sealed class WorkflowKernel
         packet.SafetyBlockers = packet.SafetyBlockers.Take(4).ToArray();
         packet.ResidualRisks = packet.ResidualRisks.Take(4).ToArray();
         packet.Diagnostics = packet.Diagnostics.Take(8).ToArray();
+        packet.ResourceLinks = packet.ResourceLinks
+            .Take(4)
+            .Select(link => new EvidenceResourceLink
+            {
+                Uri = link.Uri,
+                Kind = link.Kind,
+                Title = TrimText(link.Title, 160),
+                Summary = TrimText(link.Summary, 320),
+                IsPartial = link.IsPartial,
+            })
+            .ToArray();
+    }
+
+    private static void TrimRecommendedText<T>(T result)
+        where T : class
+    {
+        switch (result)
+        {
+            case CSharpEditTaskResult edit:
+                edit.SuggestedNextSteps = edit.SuggestedNextSteps.Take(3).Select(step => TrimText(step, 320)).ToArray();
+                break;
+            case CSharpChangeReviewTaskResult review:
+                review.SuggestedNextSteps = review.SuggestedNextSteps.Take(3).Select(step => TrimText(step, 320)).ToArray();
+                break;
+            case CSharpVerificationRunTaskResult verification:
+                verification.SuggestedNextSteps = verification.SuggestedNextSteps.Take(3).Select(step => TrimText(step, 320)).ToArray();
+                break;
+            case CSharpRuntimeExceptionTaskResult runtime:
+                runtime.SuggestedNextSteps = runtime.SuggestedNextSteps.Take(3).Select(step => TrimText(step, 320)).ToArray();
+                break;
+        }
+    }
+
+    private static string TrimText(string value, int maxCharacters)
+    {
+        return value.Length <= maxCharacters
+            ? value
+            : value[..maxCharacters] + "...";
     }
 
     private static T[] LimitForDetail<T>(T[] items, WorkflowResponseDetailLevel detailLevel)
@@ -560,7 +745,144 @@ public sealed class WorkflowKernel
             .ToArray();
     }
 
-    private sealed record TargetResolution(VisualStudioBridgeTarget Target, string[] Diagnostics);
+    private async Task<WorkspaceQueryResult<T>> ExecuteWithDeadlineAsync<T>(
+        string workflowName,
+        int maxElapsedMilliseconds,
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<WorkspaceQueryResult<T>>> action)
+        where T : class
+    {
+        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadlineCts.CancelAfter(TimeSpan.FromMilliseconds(maxElapsedMilliseconds));
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            var result = await action(deadlineCts.Token).ConfigureAwait(false);
+            stopwatch.Stop();
+            if (deadlineCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                return AnnotateDeadline(result, workflowName, maxElapsedMilliseconds, stopwatch.ElapsedMilliseconds);
+            }
+
+            return result;
+        }
+        catch (OperationCanceledException) when (
+            deadlineCts.IsCancellationRequested
+            && !cancellationToken.IsCancellationRequested)
+        {
+            stopwatch.Stop();
+            return new WorkspaceQueryResult<T>
+            {
+                IsPartial = true,
+                Diagnostics = new[]
+                {
+                    $"WorkflowDeadlineExceeded: workflow={workflowName}; maxElapsedMilliseconds={maxElapsedMilliseconds}; elapsedMilliseconds={stopwatch.ElapsedMilliseconds}.",
+                    "WorkflowDeadlineResultUnavailable: the workflow stopped before a stable task result was assembled; rerun with a narrower scope or a larger budget.",
+                },
+            };
+        }
+    }
+
+    private static WorkspaceQueryResult<T> AnnotateDeadline<T>(
+        WorkspaceQueryResult<T> result,
+        string workflowName,
+        int maxElapsedMilliseconds,
+        long elapsedMilliseconds)
+        where T : class
+    {
+        var item = result.Items.FirstOrDefault();
+        if (item is not null)
+        {
+            var packet = item switch
+            {
+                CSharpEditTaskResult edit => edit.EvidencePacket,
+                CSharpChangeReviewTaskResult review => review.EvidencePacket,
+                CSharpVerificationRunTaskResult verification => verification.EvidencePacket,
+                CSharpRuntimeExceptionTaskResult runtime => runtime.EvidencePacket,
+                _ => null,
+            };
+            if (packet is not null)
+            {
+                packet.IsPartial = true;
+                packet.Telemetry.DeadlineExceeded = true;
+                packet.Telemetry.DeadlineMilliseconds = maxElapsedMilliseconds;
+                packet.Telemetry.PhaseTimings = packet.Telemetry.PhaseTimings
+                    .Append(new WorkflowPhaseTiming
+                    {
+                        Name = "deadline-guard",
+                        ElapsedMilliseconds = elapsedMilliseconds,
+                    })
+                    .ToArray();
+                packet.Diagnostics = packet.Diagnostics
+                    .Append($"WorkflowDeadlineExceeded: workflow={workflowName}; maxElapsedMilliseconds={maxElapsedMilliseconds}.")
+                    .Take(12)
+                    .ToArray();
+            }
+        }
+
+        result.IsPartial = true;
+        result.Diagnostics = result.Diagnostics
+            .Append($"WorkflowDeadlineExceeded: workflow={workflowName}; maxElapsedMilliseconds={maxElapsedMilliseconds}; elapsedMilliseconds={elapsedMilliseconds}.")
+            .Distinct(StringComparer.Ordinal)
+            .Take(12)
+            .ToArray();
+        return result;
+    }
+
+    private static WorkspaceQueryResult<T> TargetFailure<T>(TargetResolution resolution) => new()
+    {
+        IsPartial = true,
+        Succeeded = false,
+        Diagnostics = resolution.Diagnostics,
+    };
+
+    private sealed record TargetResolution(VisualStudioBridgeTarget Target, string[] Diagnostics, bool IsFailure = false);
+
+    private sealed class WorkflowPhaseTracker
+    {
+        private readonly List<WorkflowPhaseTiming> _timings = new();
+
+        public IDisposable Measure(string name)
+        {
+            return new PhaseScope(name, _timings);
+        }
+
+        public WorkflowPhaseTiming[] Snapshot()
+        {
+            return _timings.ToArray();
+        }
+
+        private sealed class PhaseScope : IDisposable
+        {
+            private readonly string _name;
+            private readonly List<WorkflowPhaseTiming> _timings;
+            private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+            private bool _disposed;
+
+            public PhaseScope(string name, List<WorkflowPhaseTiming> timings)
+            {
+                _name = name;
+                _timings = timings;
+            }
+
+            public void Dispose()
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                _stopwatch.Stop();
+                _timings.Add(new WorkflowPhaseTiming
+                {
+                    Name = _name,
+                    ElapsedMilliseconds = _stopwatch.ElapsedMilliseconds,
+                });
+            }
+        }
+    }
 
     private static int EstimateReturnedCharacters(CSharpTaskContextPackage context)
     {

@@ -21,6 +21,75 @@ public sealed class NamedPipeVisualStudioWorkspaceBridgeTests
     }
 
     [Fact]
+    public async Task GetWorkspaceStatusAsync_ReusesDiscoveryWithinTtlAndRefreshesAfterTtl()
+    {
+        using var discovery = new TemporaryDirectory();
+        var pipeName = "VisualStudio.CSharpNavigator.Tests." + Guid.NewGuid();
+        var bridge = CreateBridge(new NamedPipeBridgeOptions
+        {
+            DiscoveryDirectory = discovery.Path,
+            SolutionPath = @"D:\WorkCodes\A\A.sln",
+            ConnectTimeoutMilliseconds = 5000,
+        });
+
+        // First call with an empty discovery directory fails and caches the empty read.
+        var first = await bridge.GetWorkspaceStatusAsync(new WorkspaceStatusRequest(), CancellationToken.None);
+        Assert.True(first.IsPartial);
+        Assert.Empty(first.Items);
+
+        // A record written immediately afterwards is invisible while the cached
+        // read is within its TTL.
+        WriteInstance(discovery.Path, "vs-a", Environment.ProcessId, @"D:\WorkCodes\A\A.sln", pipeName);
+        var second = await bridge.GetWorkspaceStatusAsync(new WorkspaceStatusRequest(), CancellationToken.None);
+        Assert.True(second.IsPartial);
+        Assert.Empty(second.Items);
+
+        // After the TTL expires the discovery directory is rescanned and the
+        // new instance is selected.
+        await Task.Delay(TimeSpan.FromSeconds(2.5));
+        var serverTask = RunWorkspaceStatusResponseServerAsync(pipeName);
+        var third = await bridge.GetWorkspaceStatusAsync(new WorkspaceStatusRequest(), CancellationToken.None);
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(third.IsPartial);
+        Assert.Single(third.Items);
+    }
+
+    [Fact]
+    public async Task GetWorkspaceStatusAsync_WhenBridgeNeverResponds_ReturnsResponseTimeoutDiagnostic()
+    {        var pipeName = "VisualStudio.CSharpNavigator.Tests.Silent." + Guid.NewGuid();
+        var bridge = CreateBridge(new NamedPipeBridgeOptions
+        {
+            PipeName = pipeName,
+            ConnectTimeoutMilliseconds = 5000,
+            ResponseTimeoutMilliseconds = 300,
+        });
+        var serverTask = RunSilentServerAsync(pipeName);
+
+        var result = await bridge.GetWorkspaceStatusAsync(new WorkspaceStatusRequest(), CancellationToken.None);
+
+        Assert.True(result.IsPartial);
+        Assert.Empty(result.Items);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Contains("BridgeResponseTimeout"));
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private static async Task RunSilentServerAsync(string pipeName)
+    {
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            transmissionMode: PipeTransmissionMode.Byte,
+            options: PipeOptions.Asynchronous);
+
+        await server.WaitForConnectionAsync();
+        using var reader = new StreamReader(server, Encoding.UTF8, leaveOpen: true);
+        await reader.ReadLineAsync();
+        // Hold the connection open without ever writing a response.
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+    }
+
+    [Fact]
     public async Task GetWorkspaceStatusAsync_SendsTypedRequestAndReadsTypedResult()
     {
         var pipeName = "VisualStudio.CSharpNavigator.Tests." + Guid.NewGuid();

@@ -333,7 +333,10 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             }
 
             var items = ReadOpenDocuments(dte, request.MaxResults, request.IncludeSelection, diagnostics);
-            return Success(items, diagnostics, diagnostics.Count > 0 || items.Length >= request.MaxResults);
+            // Partial only when the DTE source count actually exceeded the cap;
+            // a result count that merely equals MaxResults is a full window.
+            var sourceDocumentCount = dte.Documents?.Count ?? items.Length;
+            return Success(items, diagnostics, diagnostics.Count > 0 || sourceDocumentCount > items.Length);
         }
         catch (Exception ex) when (IsRecoverableException(ex))
         {

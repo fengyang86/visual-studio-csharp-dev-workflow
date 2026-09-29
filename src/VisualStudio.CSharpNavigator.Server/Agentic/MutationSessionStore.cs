@@ -30,7 +30,8 @@ public sealed class MutationSessionStore
         var record = new MutationSessionRecord(
             preview.SessionId,
             preview.WorkspaceVersion,
-            preview.CandidateIdentity,
+            preview.ChangeFingerprint,
+            CopyCandidate(preview.CandidateIdentity),
             preview.Blockers.ToArray(),
             DateTimeOffset.UtcNow);
 
@@ -93,6 +94,21 @@ public sealed class MutationSessionStore
                 "WorkspaceVersionChanged: workspace version differs from the stored preview session. Re-run the matching preview tool.");
         }
 
+        if (string.IsNullOrWhiteSpace(record.ChangeFingerprint)
+            || string.IsNullOrWhiteSpace(currentPreview.ChangeFingerprint))
+        {
+            return MutationSessionValidationResult.Blocked(
+                "MutationFingerprintRequired: 当前预览不含完整修改摘要，请使用匹配版本的服务和 VSIX 重新预览。");
+        }
+
+        if (!string.Equals(record.ChangeFingerprint, currentPreview.ChangeFingerprint, StringComparison.Ordinal)
+            || (!string.IsNullOrWhiteSpace(request.ExpectedChangeFingerprint)
+                && !string.Equals(request.ExpectedChangeFingerprint, currentPreview.ChangeFingerprint, StringComparison.Ordinal)))
+        {
+            return MutationSessionValidationResult.Blocked(
+                "MutationChangesChanged: 实际修改与已审阅预览不一致，请重新预览。");
+        }
+
         if (!CandidateEquals(record.CandidateIdentity, currentPreview.CandidateIdentity))
         {
             return MutationSessionValidationResult.Blocked(
@@ -112,11 +128,25 @@ public sealed class MutationSessionStore
     {
         return string.Equals(left.DiagnosticId, right.DiagnosticId, StringComparison.OrdinalIgnoreCase)
             && string.Equals(left.ProviderName, right.ProviderName, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(left.EquivalenceKey, right.EquivalenceKey, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(left.Title, right.Title, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(left.EquivalenceKey, right.EquivalenceKey, StringComparison.Ordinal)
+            && string.Equals(left.Title, right.Title, StringComparison.Ordinal)
             && string.Equals(left.Scope, right.Scope, StringComparison.OrdinalIgnoreCase)
             && string.Equals(left.DocumentOrProject, right.DocumentOrProject, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(left.StableKey, right.StableKey, StringComparison.OrdinalIgnoreCase);
+            && string.Equals(left.StableKey, right.StableKey, StringComparison.Ordinal);
+    }
+
+    private static MutationCandidateIdentity CopyCandidate(MutationCandidateIdentity candidate)
+    {
+        return new MutationCandidateIdentity
+        {
+            DiagnosticId = candidate.DiagnosticId,
+            ProviderName = candidate.ProviderName,
+            EquivalenceKey = candidate.EquivalenceKey,
+            Title = candidate.Title,
+            Scope = candidate.Scope,
+            DocumentOrProject = candidate.DocumentOrProject,
+            StableKey = candidate.StableKey,
+        };
     }
 
     private void RemoveExpired_NoLock(DateTimeOffset now)
@@ -154,6 +184,7 @@ public sealed class MutationSessionStore
 public sealed record MutationSessionRecord(
     string SessionId,
     string WorkspaceVersion,
+    string ChangeFingerprint,
     MutationCandidateIdentity CandidateIdentity,
     WorkspaceMutationBlocker[] Blockers,
     DateTimeOffset CreatedAt);

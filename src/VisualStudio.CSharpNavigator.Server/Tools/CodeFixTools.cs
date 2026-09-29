@@ -361,6 +361,7 @@ public sealed class CodeFixTools
         MutationSessionRecord record)
     {
         request.ExpectedWorkspaceVersion ??= record.WorkspaceVersion;
+        request.ExpectedChangeFingerprint ??= record.ChangeFingerprint;
         request.CandidateStableKey ??= record.CandidateIdentity.StableKey;
         request.ProviderName ??= record.CandidateIdentity.ProviderName;
         request.EquivalenceKey ??= record.CandidateIdentity.EquivalenceKey;
@@ -499,6 +500,7 @@ public sealed class CodeFixTools
         {
             Diagnostics = new[] { diagnostic },
             IsPartial = true,
+            Succeeded = false,
         };
     }
 }

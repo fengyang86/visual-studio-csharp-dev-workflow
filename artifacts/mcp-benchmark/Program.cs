@@ -657,6 +657,13 @@ static async Task RunLargeSolutionBenchmarkAsync(McpClient client, BenchmarkProf
     var symbolKey = await FindProfileSymbolKeyAsync(client, profile);
     var changedFiles = CreateWorkflowChangedFiles(profile);
     var buildOutput = CreateWorkflowBuildOutput(profile);
+
+    // Cache-busting counters: identical repeated requests would hit the 5s
+    // server cache and measure nothing. Iteration 1 uses the plain containing
+    // type; later iterations vary the query/positions so every call is a miss.
+    var namespaceQueryCounter = 0;
+    var batchPositionCounter = 0;
+
     var cases = new List<BenchmarkCase>
     {
         new(
@@ -682,6 +689,43 @@ static async Task RunLargeSolutionBenchmarkAsync(McpClient client, BenchmarkProf
                     payload.RootElement.GetProperty("items"),
                     profile.ExpectedSymbolName,
                     profile.ExpectedContainingType);
+            }),
+        new(
+            "Large_SearchSymbol_DisplayFallback",
+            () =>
+            {
+                var suffix = namespaceQueryCounter++ == 0 ? string.Empty : "x" + namespaceQueryCounter;
+                return CallAsync(client, "search_csharp_symbols", profile.WithTarget(new Dictionary<string, object?>
+                {
+                    ["queryText"] = profile.ExpectedContainingType + suffix,
+                    ["maxResults"] = 50,
+                    ["includeGeneratedCode"] = false,
+                }));
+            },
+            payload =>
+            {
+                Require(
+                    !payload.RootElement.TryGetProperty("succeeded", out var succeeded) || succeeded.GetBoolean(),
+                    "Namespace-qualified search should succeed.");
+            }),
+        new(
+            "Large_BatchSourceContexts",
+            () => CallAsync(client, "batch_get_csharp_source_contexts", profile.WithTarget(new Dictionary<string, object?>
+            {
+                ["positions"] = Enumerable.Range(0, 20).Select(index => new Dictionary<string, object?>
+                {
+                    ["filePath"] = profile.DocumentPath,
+                    ["line"] = 5 + index,
+                    ["column"] = 5 + batchPositionCounter,
+                }).ToArray(),
+                ["contextLines"] = 2,
+                ["includeGeneratedCode"] = false,
+            })),
+            payload =>
+            {
+                Require(
+                    payload.RootElement.GetProperty("items").GetArrayLength() >= 1,
+                    "Batch source contexts should return at least one snippet.");
             }),
         new(
             "Large_FindDefinitions",

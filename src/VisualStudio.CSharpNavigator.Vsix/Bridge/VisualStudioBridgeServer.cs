@@ -15,24 +15,43 @@ internal sealed class VisualStudioBridgeServer : IDisposable
 {
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(60);
 
+    // Workspace mutations (solution-scope cleanup / Fix All) legitimately run
+    // longer than read queries on large solutions; give them a separate budget
+    // so heavy previews do not get killed at the read-query ceiling.
+    private static readonly TimeSpan MutationRequestTimeout = TimeSpan.FromSeconds(180);
+
+    // A hostile or buggy client streaming an endless line without a newline
+    // would grow an unbounded string inside the devenv process; cap the request
+    // line at 64 MB (project graphs with full metadata reach single-digit MB).
+    private const int MaxRequestCharacters = 64 * 1024 * 1024;
+
     private readonly BridgeInstanceRegistry _registry;
     private readonly VisualStudioWorkspaceQueryService _queryService;
     private readonly VisualStudioDebugContextService _debugContextService;
     private readonly VisualStudioDebugControlService _debugControlService;
+    private readonly VisualStudio.CSharpNavigator.Vsix.Workspace.VisualStudioBuildActivityService _buildActivityService;
     private readonly CancellationTokenSource _disposeCts = new();
+    private readonly PipeBridgeRequestDispatcher _requestDispatcher;
     private Task? _acceptLoopTask;
     private bool _disposed;
+
+    internal Microsoft.VisualStudio.Shell.AsyncPackage? PackageBridge { get; set; }
 
     public VisualStudioBridgeServer(
         BridgeInstanceRegistry registry,
         VisualStudioWorkspaceQueryService queryService,
         VisualStudioDebugContextService debugContextService,
-        VisualStudioDebugControlService debugControlService)
+        VisualStudioDebugControlService debugControlService,
+        VisualStudio.CSharpNavigator.Vsix.Workspace.VisualStudioBuildActivityService? buildActivityService = null,
+        Microsoft.VisualStudio.Shell.AsyncPackage? package = null)
     {
         _registry = registry;
         _queryService = queryService;
         _debugContextService = debugContextService;
         _debugControlService = debugControlService;
+        _buildActivityService = buildActivityService ?? new VisualStudio.CSharpNavigator.Vsix.Workspace.VisualStudioBuildActivityService(
+            package ?? throw new ArgumentNullException(nameof(package), "The bridge server needs the AsyncPackage to create the build/activity service."));
+        _requestDispatcher = new PipeBridgeRequestDispatcher(_registry.PipeName, DispatchAsync, ValidateTargetAsync);
     }
 
     public void Start()
@@ -132,31 +151,32 @@ internal sealed class VisualStudioBridgeServer : IDisposable
         CancellationToken serverCancellationToken)
     {
         using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(serverCancellationToken);
-        requestCts.CancelAfter(RequestTimeout);
-
-        using var reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
-        using var writer = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 4096, leaveOpen: true)
+        var requestJsonFirst = await ReadFirstLineWithBudgetAsync(pipe, serverCancellationToken).ConfigureAwait(false);
+        if (requestJsonFirst is null)
         {
-            AutoFlush = true,
-        };
+            return;
+        }
+
+        var isTrackedMutation = IsTrackedMutation(requestJsonFirst);
+        requestCts.CancelAfter(isTrackedMutation ? MutationRequestTimeout : RequestTimeout);
 
         string responseJson;
         var requestStopwatch = Stopwatch.StartNew();
         try
         {
-            var requestJson = await ReadLineWithTimeoutAsync(reader, requestCts.Token).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(requestJson))
+            if (string.IsNullOrWhiteSpace(requestJsonFirst))
             {
                 responseJson = ErrorJson("MalformedRequest", "The bridge request was empty.");
             }
             else
             {
-                responseJson = await DispatchAsync(requestJson!, requestCts.Token).ConfigureAwait(false);
+                responseJson = await _requestDispatcher.ExecuteAsync(requestJsonFirst, requestCts.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (!serverCancellationToken.IsCancellationRequested)
         {
-            responseJson = ErrorJson("RequestTimedOut", $"The bridge request exceeded {RequestTimeout.TotalSeconds:n0} seconds.");
+            var budget = isTrackedMutation ? MutationRequestTimeout : RequestTimeout;
+            responseJson = ErrorJson("RequestTimedOut", $"The bridge request exceeded {budget.TotalSeconds:n0} seconds.");
         }
         catch (OperationCanceledException)
         {
@@ -175,50 +195,108 @@ internal sealed class VisualStudioBridgeServer : IDisposable
 
         requestStopwatch.Stop();
         responseJson = AddExecutionTiming(responseJson, requestStopwatch.ElapsedMilliseconds);
+        using var writer = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 4096, leaveOpen: true)
+        {
+            AutoFlush = true,
+        };
         await writer.WriteLineAsync(responseJson).ConfigureAwait(false);
     }
 
-    private static async Task<string?> ReadLineWithTimeoutAsync(
-        StreamReader reader,
+    private static bool IsTrackedMutation(string requestJson)
+    {
+        // Cheap substring probe: every tracked method name appears verbatim in
+        // the JSON envelope; false positives only inflate the budget, which is
+        // harmless for read queries.
+        return requestJson.IndexOf("\"ApplyRename\"", StringComparison.Ordinal) >= 0
+            || requestJson.IndexOf("\"ApplyCleanup\"", StringComparison.Ordinal) >= 0
+            || requestJson.IndexOf("\"ApplyCodeFix\"", StringComparison.Ordinal) >= 0
+            || requestJson.IndexOf("\"ApplyFixAll\"", StringComparison.Ordinal) >= 0
+            || requestJson.IndexOf("\"ApplyTextEdit\"", StringComparison.Ordinal) >= 0;
+    }
+
+    private async Task<string?> ReadFirstLineWithBudgetAsync(
+        NamedPipeServerStream pipe,
+        CancellationToken serverCancellationToken)
+    {
+        using var reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
+        var builder = new StringBuilder();
+        var buffer = new char[8192];
+        try
+        {
+            while (builder.Length < MaxRequestCharacters)
+            {
+                var read = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
+                if (read <= 0)
+                {
+                    break;
+                }
+
+                var newlineIndex = Array.IndexOf(buffer, '\n', 0, read);
+                if (newlineIndex >= 0)
+                {
+                    builder.Append(buffer, 0, newlineIndex);
+                    return builder.ToString();
+                }
+
+                builder.Append(buffer, 0, read);
+            }
+
+            if (builder.Length >= MaxRequestCharacters)
+            {
+                using var rejectWriter = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 4096, leaveOpen: true)
+                {
+                    AutoFlush = true,
+                };
+                await rejectWriter.WriteLineAsync(ErrorJson("RequestTooLarge", $"The bridge request exceeded {MaxRequestCharacters} characters.")).ConfigureAwait(false);
+                BridgeLog.Warning($"Visual Studio bridge rejected a request larger than {MaxRequestCharacters} characters.");
+                return null;
+            }
+
+            return builder.ToString();
+        }
+        catch (IOException ex)
+        {
+            BridgeLog.Warning("Visual Studio bridge client disconnected while sending a request: " + ex.Message);
+            return null;
+        }
+        catch (OperationCanceledException) when (serverCancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    private async Task<string?> ValidateTargetAsync(
+        PipeBridgeRequestEnvelope request,
         CancellationToken cancellationToken)
     {
-        var readTask = reader.ReadLineAsync();
-        var completedTask = await Task.WhenAny(readTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken))
-            .ConfigureAwait(false);
-        if (!ReferenceEquals(completedTask, readTask))
+        var target = DeserializePayload<WorkspaceStatusRequest>(request).Target;
+        if (target is not null && !target.IsEmpty)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var actual = new VisualStudioBridgeTarget
+            {
+                InstanceId = _registry.InstanceId,
+                PipeName = _registry.PipeName,
+            };
+            if (!string.IsNullOrWhiteSpace(target.SolutionPath))
+            {
+                var status = await _queryService.GetWorkspaceStatusResultAsync(
+                    _registry.InstanceId, _registry.ProcessId, cancellationToken, snapshotOnly: true).ConfigureAwait(false);
+                actual.SolutionPath = status.Items.FirstOrDefault()?.SolutionPath ?? string.Empty;
+            }
+
+            if (!WorkspaceTargetIdentity.Matches(target, actual))
+            {
+                return ErrorJson("WorkspaceTargetMismatch", "当前实例或解决方案与请求目标不一致，请重新选择工作区。");
+            }
         }
 
-        return await readTask.ConfigureAwait(false);
+        return null;
     }
 
     private async Task<string> DispatchAsync(
-        string requestJson,
+        PipeBridgeRequestEnvelope request,
         CancellationToken cancellationToken)
     {
-        PipeBridgeRequestEnvelope? request;
-        try
-        {
-            request = JsonSerializer.Deserialize<PipeBridgeRequestEnvelope>(
-                requestJson,
-                PipeBridgeProtocol.JsonOptions);
-        }
-        catch (JsonException ex)
-        {
-            return ErrorJson("MalformedRequest", "The bridge request was not valid JSON: " + ex.Message);
-        }
-
-        if (request is null)
-        {
-            return ErrorJson("MalformedRequest", "The bridge request could not be parsed.");
-        }
-
-        if (!string.Equals(request.ProtocolVersion, PipeBridgeProtocol.Version, StringComparison.Ordinal))
-        {
-            return ErrorJson("UnsupportedProtocolVersion", $"Protocol version '{request.ProtocolVersion}' is not supported.");
-        }
-
         try
         {
             return request.Method switch
@@ -226,7 +304,8 @@ internal sealed class VisualStudioBridgeServer : IDisposable
                 "GetWorkspaceStatus" => SuccessJson(await _queryService.GetWorkspaceStatusResultAsync(
                     _registry.InstanceId,
                     _registry.ProcessId,
-                    cancellationToken).ConfigureAwait(false)),
+                    cancellationToken,
+                    DeserializePayload<WorkspaceStatusRequest>(request).SnapshotOnly).ConfigureAwait(false)),
                 "SearchSymbols" => SuccessJson(await _queryService.SearchSymbolsAsync(
                     DeserializePayload<SymbolSearchRequest>(request),
                     cancellationToken).ConfigureAwait(false)),
@@ -251,6 +330,9 @@ internal sealed class VisualStudioBridgeServer : IDisposable
                 "GetSourceContext" => SuccessJson(await _queryService.GetSourceContextAsync(
                     DeserializePayload<SourceContextRequest>(request),
                     cancellationToken).ConfigureAwait(false)),
+                "GetSourceContexts" => SuccessJson(await _queryService.GetSourceContextsAsync(
+                    DeserializePayload<BatchSourceContextRequest>(request),
+                    cancellationToken).ConfigureAwait(false)),
                 "ListDocumentSymbols" => SuccessJson(await _queryService.ListDocumentSymbolsAsync(
                     DeserializePayload<DocumentSymbolsRequest>(request),
                     cancellationToken).ConfigureAwait(false)),
@@ -265,6 +347,18 @@ internal sealed class VisualStudioBridgeServer : IDisposable
                     cancellationToken).ConfigureAwait(false)),
                 "GetDiagnostics" => SuccessJson(await _queryService.GetDiagnosticsAsync(
                     DeserializePayload<DiagnosticsRequest>(request),
+                    cancellationToken).ConfigureAwait(false)),
+                "GetLiveDiagnostics" => SuccessJson(await _queryService.GetLiveDiagnosticsAsync(
+                    DeserializePayload<LiveDiagnosticsRequest>(request),
+                    cancellationToken).ConfigureAwait(false)),
+                "StartVisualStudioBuild" => SuccessJson(await _buildActivityService.StartBuildAsync(
+                    DeserializePayload<VisualStudioBuildRequest>(request),
+                    cancellationToken).ConfigureAwait(false)),
+                "GetVisualStudioBuildStatus" => SuccessJson(await _buildActivityService.GetBuildStatusAsync(
+                    DeserializePayload<VisualStudioBuildStatusRequest>(request),
+                    cancellationToken).ConfigureAwait(false)),
+                "GetVisualStudioActivity" => SuccessJson(await _buildActivityService.GetActivityAsync(
+                    DeserializePayload<VisualStudioActivityRequest>(request),
                     cancellationToken).ConfigureAwait(false)),
                 "GetErrorList" => SuccessJson(await _queryService.GetErrorListAsync(
                     DeserializePayload<ErrorListRequest>(request),
@@ -361,6 +455,12 @@ internal sealed class VisualStudioBridgeServer : IDisposable
                     cancellationToken).ConfigureAwait(false)),
                 "ApplyCleanup" => SuccessJson(await _queryService.ApplyCleanupAsync(
                     DeserializePayload<CSharpCleanupApplyRequest>(request),
+                    cancellationToken).ConfigureAwait(false)),
+                "PreviewTextEdit" => SuccessJson(await _queryService.PreviewTextEditAsync(
+                    DeserializePayload<CSharpTextEditRequest>(request),
+                    cancellationToken).ConfigureAwait(false)),
+                "ApplyTextEdit" => SuccessJson(await _queryService.ApplyTextEditAsync(
+                    DeserializePayload<CSharpTextEditApplyRequest>(request),
                     cancellationToken).ConfigureAwait(false)),
                 "ListCodeFixes" => SuccessJson(await _queryService.ListCodeFixesAsync(
                     DeserializePayload<CSharpCodeFixListRequest>(request),

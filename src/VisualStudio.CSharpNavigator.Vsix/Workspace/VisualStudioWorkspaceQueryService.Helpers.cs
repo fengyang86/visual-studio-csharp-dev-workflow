@@ -28,6 +28,7 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             Items = Array.Empty<T>(),
             Diagnostics = new[] { diagnostic },
             IsPartial = true,
+            Succeeded = false,
         };
     }
 

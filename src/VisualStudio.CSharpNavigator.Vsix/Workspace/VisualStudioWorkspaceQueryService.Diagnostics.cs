@@ -62,35 +62,68 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             .Where(project => requestedDocument is null || project.Id == requestedDocument.Project.Id)
             .ToArray();
 
+        var effectiveCollectionMode = request.CollectionMode;
+        if (effectiveCollectionMode == CodeDiagnosticCollectionMode.Auto)
+        {
+            effectiveCollectionMode = DiagnosticsNoisePolicy.HasFocusedScope(request)
+                ? CodeDiagnosticCollectionMode.Complete
+                : CodeDiagnosticCollectionMode.Fast;
+        }
+        var effectiveMaxProjects = request.MaxProjects;
+        var effectiveMaxElapsedMilliseconds = request.MaxElapsedMilliseconds;
+        if (effectiveCollectionMode == CodeDiagnosticCollectionMode.Fast)
+        {
+            effectiveMaxProjects = effectiveMaxProjects == 0 ? 20 : Math.Min(effectiveMaxProjects, 20);
+            effectiveMaxElapsedMilliseconds = Math.Min(effectiveMaxElapsedMilliseconds, 15000);
+        }
+
         if (!string.IsNullOrWhiteSpace(request.ProjectName) && projects.Length == 0)
         {
             return Failure<CodeDiagnostic>("ProjectNotFound: no C# project matched the requested project name.");
         }
 
         var diagnostics = new List<string>();
+        var initiallyMatchedProjectCount = projects.Length;
+        if (requestedDocument is null
+            && string.IsNullOrWhiteSpace(request.ProjectName)
+            && (request.IncludePathPatterns?.Length > 0 || request.ChangedFiles?.Length > 0))
+        {
+            var scopePatterns = (request.IncludePathPatterns ?? Array.Empty<string>())
+                .Concat(request.ChangedFiles ?? Array.Empty<string>())
+                .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+                .ToArray();
+            projects = projects
+                .Where(project => project.Documents.Any(document =>
+                    !string.IsNullOrWhiteSpace(document.FilePath)
+                    && scopePatterns.Any(pattern => MatchesPathPattern(document.FilePath!, pattern))))
+                .ToArray();
+            diagnostics.Add(
+                $"DiagnosticsProjectScope: narrowed compilation from {initiallyMatchedProjectCount} to {projects.Length} project(s) using includePathPatterns/changedFiles before diagnostics collection.");
+        }
+
         var items = new List<CodeDiagnostic>();
         var isPartial = false;
         var excludedByPathCount = 0;
         var filteredByNoiseProfileCount = 0;
         var processedProjectCount = 0;
-        var projectsToProcess = request.MaxProjects == 0
+        var projectsToProcess = effectiveMaxProjects == 0
             ? projects
-            : projects.Take(request.MaxProjects).ToArray();
+            : projects.Take(effectiveMaxProjects).ToArray();
         if (projectsToProcess.Length < projects.Length)
         {
-            diagnostics.Add($"DiagnosticsProjectLimit: processed {projectsToProcess.Length} of {projects.Length} matching C# project(s) because MaxProjects={request.MaxProjects}.");
+            diagnostics.Add($"DiagnosticsProjectLimit: processed {projectsToProcess.Length} of {projects.Length} matching C# project(s) because MaxProjects={effectiveMaxProjects}.");
             isPartial = true;
         }
 
         var elapsed = Stopwatch.StartNew();
         using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        budgetCts.CancelAfter(TimeSpan.FromMilliseconds(request.MaxElapsedMilliseconds));
+        budgetCts.CancelAfter(TimeSpan.FromMilliseconds(effectiveMaxElapsedMilliseconds));
         foreach (var project in projectsToProcess)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (elapsed.ElapsedMilliseconds >= request.MaxElapsedMilliseconds)
+            if (elapsed.ElapsedMilliseconds >= effectiveMaxElapsedMilliseconds)
             {
-                diagnostics.Add($"DiagnosticsTimeBudgetExceeded: processed {processedProjectCount} of {projects.Length} matching C# project(s) before MaxElapsedMilliseconds={request.MaxElapsedMilliseconds}.");
+                diagnostics.Add($"DiagnosticsTimeBudgetExceeded: processed {processedProjectCount} of {projects.Length} matching C# project(s) before MaxElapsedMilliseconds={effectiveMaxElapsedMilliseconds}.");
                 isPartial = true;
                 break;
             }
@@ -102,7 +135,7 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && budgetCts.IsCancellationRequested)
             {
-                diagnostics.Add($"DiagnosticsTimeBudgetExceeded: processed {processedProjectCount} of {projects.Length} matching C# project(s) before MaxElapsedMilliseconds={request.MaxElapsedMilliseconds}.");
+                diagnostics.Add($"DiagnosticsTimeBudgetExceeded: processed {processedProjectCount} of {projects.Length} matching C# project(s) before MaxElapsedMilliseconds={effectiveMaxElapsedMilliseconds}.");
                 isPartial = true;
                 break;
             }
@@ -138,7 +171,7 @@ internal sealed partial class VisualStudioWorkspaceQueryService
                 cancellationToken.ThrowIfCancellationRequested();
                 if (budgetCts.IsCancellationRequested)
                 {
-                    diagnostics.Add($"DiagnosticsTimeBudgetExceeded: processed {processedProjectCount} of {projects.Length} matching C# project(s) before MaxElapsedMilliseconds={request.MaxElapsedMilliseconds}.");
+                    diagnostics.Add($"DiagnosticsTimeBudgetExceeded: processed {processedProjectCount} of {projects.Length} matching C# project(s) before MaxElapsedMilliseconds={effectiveMaxElapsedMilliseconds}.");
                     isPartial = true;
                     timeBudgetExceeded = true;
                     break;
@@ -196,6 +229,7 @@ internal sealed partial class VisualStudioWorkspaceQueryService
         {
             diagnostics.Add(DiagnosticsNoisePolicy.AutoNoiseFilterDiagnostic);
         }
+        diagnostics.Add($"DiagnosticsCoverage: mode={effectiveCollectionMode}; processedProjects={processedProjectCount}; matchingProjects={projects.Length}; elapsedBudgetMilliseconds={effectiveMaxElapsedMilliseconds}; complete={!isPartial && processedProjectCount >= projects.Length}.");
 
         var rankedItems = items
             .OrderByDescending(item => item.RelevanceScore)
@@ -502,6 +536,210 @@ internal sealed partial class VisualStudioWorkspaceQueryService
             Microsoft.CodeAnalysis.DiagnosticSeverity.Warning => CodeDiagnosticSeverity.Warning,
             Microsoft.CodeAnalysis.DiagnosticSeverity.Error => CodeDiagnosticSeverity.Error,
             _ => CodeDiagnosticSeverity.Hidden,
+        };
+    }
+
+    public async Task<WorkspaceQueryResult<CodeDiagnostic>> GetLiveDiagnosticsAsync(
+        LiveDiagnosticsRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.MaxResults is < 1 or > 5000)
+        {
+            return Failure<CodeDiagnostic>("MaxResults must be between 1 and 5000.");
+        }
+
+        var componentModelResult = await TryGetComponentModelAsync(cancellationToken).ConfigureAwait(false);
+        if (componentModelResult.ComponentModel is null)
+        {
+            return Failure<CodeDiagnostic>(
+                componentModelResult.Diagnostic ?? "WorkspaceUnavailable: SComponentModel service is not available.");
+        }
+
+        var solutionResult = await GetRequiredSolutionAsync(cancellationToken).ConfigureAwait(false);
+        if (solutionResult.Failure is not null)
+        {
+            return solutionResult.Failure.As<CodeDiagnostic>();
+        }
+
+        var solution = solutionResult.Solution!;
+        Document? requestedDocument = null;
+        if (!string.IsNullOrWhiteSpace(request.FilePath))
+        {
+            requestedDocument = await FindDocumentByPathAsync(
+                    solution,
+                    request.FilePath,
+                    request.IncludeGeneratedCode,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.FilePath) && requestedDocument is null)
+        {
+            return Failure<CodeDiagnostic>("DocumentNotFound: the requested file is not in the active solution.");
+        }
+
+        var projects = solution.Projects
+            .Where(project => project.Language == LanguageNames.CSharp)
+            .Where(project => string.IsNullOrWhiteSpace(request.ProjectName)
+                || string.Equals(project.Name, request.ProjectName, StringComparison.OrdinalIgnoreCase))
+            .Where(project => requestedDocument is null || project.Id == requestedDocument.Project.Id)
+            .ToArray();
+
+        if (!string.IsNullOrWhiteSpace(request.ProjectName) && projects.Length == 0)
+        {
+            return Failure<CodeDiagnostic>("ProjectNotFound: no C# project matched the requested project name.");
+        }
+
+        // Reuse the analyzer-pass mapping/scoring helpers by shaping a shim
+        // request; live diagnostics never apply noise profiles or budgets.
+        var mappingShim = new DiagnosticsRequest
+        {
+            IncludePathPatterns = request.IncludePathPatterns,
+            ExcludePathPatterns = request.ExcludePathPatterns,
+            ChangedFiles = request.ChangedFiles,
+            IncludeGeneratedCode = request.IncludeGeneratedCode,
+        };
+
+        var diagnostics = new List<string>
+        {
+            "LiveDiagnostics: read from Visual Studio's live background analysis; completeness is best-effort while analysis is pending. Use get_csharp_diagnostics for guaranteed complete synchronous analysis.",
+        };
+        var items = new List<CodeDiagnostic>();
+        var excludedByPathCount = 0;
+        var truncated = false;
+        foreach (var project in projects)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var (projectDiagnostics, failure, liveIdCount) = await VisualStudioLiveDiagnosticsReader.GetProjectDiagnosticsAsync(
+                    _workspace,
+                    componentModelResult.ComponentModel,
+                    project,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            diagnostics.Add($"LiveDiagnosticsSource: analyzer id count={liveIdCount}, returned={projectDiagnostics.Count} for project '{project.Name}'.");
+            if (failure is not null)
+            {
+                diagnostics.Add(failure);
+                return new WorkspaceQueryResult<CodeDiagnostic>
+                {
+                    Items = items.ToArray(),
+                    Diagnostics = diagnostics.ToArray(),
+                    IsPartial = true,
+                    Succeeded = false,
+                };
+            }
+
+            foreach (var diagnostic in projectDiagnostics)
+            {
+                if (IsExcludedLivePath(diagnostic.FilePath, request.ExcludePathPatterns))
+                {
+                    excludedByPathCount++;
+                    continue;
+                }
+
+                if (!IsIncludedLivePath(diagnostic.FilePath, request.IncludePathPatterns))
+                {
+                    continue;
+                }
+
+                if (!MatchesMinimumSeverity(diagnostic.Severity, request.MinimumSeverity))
+                {
+                    continue;
+                }
+
+                if (!request.IncludeGeneratedCode
+                    && diagnostic.FilePath is not null
+                    && IsGeneratedPath(diagnostic.FilePath))
+                {
+                    continue;
+                }
+
+                items.Add(CreateLiveDiagnostic(project.Name, diagnostic, mappingShim));
+                if (items.Count >= request.MaxResults)
+                {
+                    truncated = true;
+                    break;
+                }
+            }
+
+            if (items.Count >= request.MaxResults)
+            {
+                break;
+            }
+        }
+
+        if (excludedByPathCount > 0)
+        {
+            diagnostics.Add($"DiagnosticsExcludedByPathFilters: {excludedByPathCount} diagnostic(s) were suppressed by excludePathPatterns.");
+        }
+
+        if (truncated)
+        {
+            diagnostics.Add($"DiagnosticsTruncated: kept the first {request.MaxResults} live diagnostic(s).");
+        }
+
+        return new WorkspaceQueryResult<CodeDiagnostic>
+        {
+            Items = items.ToArray(),
+            Diagnostics = diagnostics.ToArray(),
+            IsPartial = truncated,
+        };
+    }
+
+    private static bool IsExcludedLivePath(string? filePath, string[] excludePathPatterns)
+    {
+        return !string.IsNullOrWhiteSpace(filePath)
+            && excludePathPatterns.Any(pattern => MatchesPathPattern(filePath!, pattern));
+    }
+
+    private static bool IsIncludedLivePath(string? filePath, string[] includePathPatterns)
+    {
+        if (includePathPatterns.Length == 0)
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(filePath)
+            && includePathPatterns.Any(pattern => MatchesPathPattern(filePath!, pattern));
+    }
+
+    private static CodeDiagnostic CreateLiveDiagnostic(
+        string projectName,
+        VisualStudioLiveDiagnosticsReader.LiveDiagnosticItem diagnostic,
+        DiagnosticsRequest scoringShim)
+    {
+        var severity = MapDiagnosticSeverity(diagnostic.Severity);
+        SourceSpan? span = diagnostic.FilePath is null
+            ? null
+            : new SourceSpan
+            {
+                FilePath = diagnostic.FilePath,
+                StartLine = diagnostic.StartLine,
+                StartColumn = diagnostic.StartColumn,
+                EndLine = diagnostic.EndLine,
+                EndColumn = diagnostic.EndColumn,
+            };
+        return new CodeDiagnostic
+        {
+            Id = diagnostic.Id,
+            Title = diagnostic.Category,
+            Message = diagnostic.Message,
+            Severity = severity,
+            ProjectName = projectName,
+            Span = span,
+            RelevanceScore = severity switch
+            {
+                CodeDiagnosticSeverity.Error => 100,
+                CodeDiagnosticSeverity.Warning => 40,
+                CodeDiagnosticSeverity.Info => 10,
+                _ => 0,
+            } + (MatchesAnyPathPattern(diagnostic.FilePath, scoringShim.ChangedFiles) ? 25 : 0),
+            ScopeReasons = new[]
+            {
+                "live diagnostics",
+                MatchesAnyPathPattern(diagnostic.FilePath, scoringShim.ChangedFiles) ? "changed file" : "project scope",
+            },
         };
     }
 }

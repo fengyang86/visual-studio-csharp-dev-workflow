@@ -117,6 +117,88 @@ public sealed class ReferenceRoleClassifierTests
         Assert.Equal(ReferenceRole.Unknown, role);
     }
 
+    [Fact]
+    public void Classify_ReturnsRead_ForAssignmentReceiversAndIndexes()
+    {
+        var syntax = CSharpSyntaxTree.ParseText("""
+            class Sample
+            {
+                void Test()
+                {
+                    Config.Name = "x";
+                    Items[index] = value;
+                    Outer.Inner.Flag = true;
+                }
+            }
+            """);
+
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "Config"));
+        Assert.Equal(ReferenceRole.Write, ClassifyToken(syntax, "Name"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "Items"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "index"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "Outer"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "Inner"));
+        Assert.Equal(ReferenceRole.Write, ClassifyToken(syntax, "Flag"));
+    }
+
+    [Fact]
+    public void Classify_ReturnsRead_ForRefOutReceiversAndIndexes()
+    {
+        var syntax = CSharpSyntaxTree.ParseText("""
+            class Sample
+            {
+                void Test()
+                {
+                    map.TryGetValue(key, out box.Score);
+                    parser.Read(out slots[index]);
+                }
+            }
+            """);
+
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "map"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "key"));
+        Assert.Equal(ReferenceRole.Write, ClassifyToken(syntax, "Score"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "box"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "slots"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "index"));
+    }
+
+    [Fact]
+    public void Classify_ReturnsWrite_OnlyForMemberAccessIncrementTarget()
+    {
+        var syntax = CSharpSyntaxTree.ParseText("""
+            class Sample
+            {
+                void Test()
+                {
+                    counter.Total++;
+                    --state.RetryCount;
+                }
+            }
+            """);
+
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "counter"));
+        Assert.Equal(ReferenceRole.Write, ClassifyToken(syntax, "Total"));
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "state"));
+        Assert.Equal(ReferenceRole.Write, ClassifyToken(syntax, "RetryCount"));
+    }
+
+    [Fact]
+    public void Classify_ReturnsRead_ForSuppressionOperator()
+    {
+        var syntax = CSharpSyntaxTree.ParseText("""
+            class Sample
+            {
+                void Test()
+                {
+                    var current = handler!;
+                }
+            }
+            """);
+
+        Assert.Equal(ReferenceRole.Read, ClassifyToken(syntax, "handler"));
+    }
+
     private static ReferenceRole ClassifyToken(SyntaxTree syntaxTree, string tokenText, int occurrenceIndex = 0)
     {
         var root = syntaxTree.GetRoot();

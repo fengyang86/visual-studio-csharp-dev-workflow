@@ -689,8 +689,11 @@ internal sealed class VisualStudioDebugContextService
     {
         var name = ReadDynamic(() => (string)expression.Name, string.Empty);
         var value = SanitizeValue(name, ReadDynamic(() => (string)expression.Value, string.Empty), maxStringLength);
-        var dataMembers = ReadDynamic(() => expression.DataMembers, null);
-        var hasChildren = EnumerateDynamic(dataMembers).Count > 0;
+        // Reading .Value may already have evaluated property getters in the debuggee;
+        // do not additionally enumerate DataMembers (another evaluation surface) just
+        // to compute IsExpandable when children were not requested.
+        var dataMembers = includeDataMembers ? ReadDynamic(() => expression.DataMembers, null) : null;
+        var hasChildren = includeDataMembers && EnumerateDynamic(dataMembers).Count > 0;
         return new DebugVariableInfo
         {
             Name = name,
@@ -856,6 +859,7 @@ internal sealed class VisualStudioDebugContextService
             Items = Array.Empty<T>(),
             Diagnostics = new[] { diagnostic },
             IsPartial = true,
+            Succeeded = false,
         };
     }
 
